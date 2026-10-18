@@ -3,8 +3,7 @@
 A collection of reusable TypeScript utilities for request handling, error management, rate limiting, UUID operations, IP address extraction, and User-Agent parsing.
 
 [![npm version](https://img.shields.io/npm/v/@tolha/react)](https://www.npmjs.com/package/@tolha/react)
-[![npm downloads](https://img.shields.io/npm/dm/@tolha/react)](https://www.npmjs.com/package/@tolha/react)
-[![License](https://img.shields.io/npm/l/@tolha/react)](./LICENSE)
+[![License](https://img.shields.io/github/license/mdtolhabinashraf/react)](./LICENSE)
 
 ## Features
 
