@@ -7,6 +7,7 @@ Complete API reference for `@tolha/react`, covering the package's utility functi
 - [Installation](#installation)
 - [Imports](#imports)
 - [UUID](#uuid)
+- [Endpoint Utilities](#endpoint-utilities)
 - [IP Address Utilities](#ip-address-utilities)
 - [HTTP Header Utilities](#http-header-utilities)
 - [User-Agent Detection](#user-agent-detection)
@@ -24,17 +25,13 @@ npm install @tolha/react
 
 ## Imports
 
-Import the utilities you need from the package's public entry point, assuming they are exported from `src/index.ts`.
+The package has a browser-safe root entry point and a server entry point. Import
+UUID and application-error utilities from `@tolha/react`; import request and
+endpoint utilities from `@tolha/react/server`.
 
 ```ts
 import {
   UUID,
-  sanitizeIp,
-  getClientIp,
-  getHeader,
-  getUserAgent,
-  createRateLimiter,
-  MemoryRateLimitStore,
   createAppError,
   ErrorResponse,
   isAppErrorPreset,
@@ -44,13 +41,6 @@ import {
 } from "@tolha/react";
 
 import type {
-  RateLimitConfig,
-  RateLimitStore,
-  RateLimitStoreOptions,
-  RateLimitStoreResult,
-  RateLimitResult,
-  RateLimitCheckOptions,
-  RateLimiter,
   ErrorPriority,
   AppErrorPreset,
   AppErrorOverrides,
@@ -58,16 +48,53 @@ import type {
   ErrorResponseBody,
   DefaultErrorKeys,
   ErrorPresetKeys,
+} from "@tolha/react";
+
+import {
+  sanitizeIp,
+  getClientIp,
+  getHeader,
+  getUserAgent,
+  createRateLimiter,
+  MemoryRateLimitStore,
+  Endpoint,
+  EndpointDefinition,
+} from "@tolha/react/server";
+
+import type {
+  RateLimitConfig,
+  RateLimitStore,
+  RateLimitStoreOptions,
+  RateLimitStoreResult,
+  RateLimitResult,
+  RateLimitCheckOptions,
+  RateLimiter,
   UserAgentInfo,
   UserAgentBrowserName,
   UserAgentOSName,
   UserAgentDeviceType,
   UserAgentEngineName,
   UserAgentArchitecture,
-} from "@tolha/react";
+  HttpMethod,
+  EndpointContext,
+  EndpointContextFactory,
+  EndpointMiddlewareArgs,
+  EndpointMiddleware,
+  EndpointHandlerArgs,
+  EndpointHandler,
+  JoinPaths,
+} from "@tolha/react/server";
 ```
 
-The import paths above assume these exports are exposed by your package. Adjust them to match your actual entry points.
+`zod` is a runtime dependency and is used to define endpoint input schemas:
+
+```ts
+import { z } from "zod";
+```
+
+The `@tolha/react/browser` subpath is reserved for browser-specific exports.
+The current package does not expose additional browser utilities from that
+entry point.
 
 ---
 
@@ -151,6 +178,159 @@ const withExpiration = UUID.validate(
 
 ---
 
+## Endpoint Utilities
+
+Endpoint utilities are available from `@tolha/react/server`. They define
+type-safe request handlers with optional Zod validation, request-scoped
+context, middleware, and response helpers. They do not register routes or
+convert thrown errors into HTTP responses; use them from your framework's
+server adapter.
+
+### `EndpointDefinition`
+
+`EndpointDefinition` represents one concrete route.
+
+```ts
+import { z } from "zod";
+import { EndpointDefinition } from "@tolha/react/server";
+
+const getUser = new EndpointDefinition({
+  path: "/users/:id",
+  method: "GET",
+  input: {
+    querySchema: z.object({
+      includePosts: z.coerce.boolean().optional(),
+    }),
+  },
+  context: async () => ({
+    userId: "authenticated-user",
+  }),
+  middleware: [
+    ({ context }) => {
+      if (!context.userId) {
+        throw new Error("Unauthorized");
+      }
+    },
+  ],
+  handler: ({ query, context, response }) =>
+    response.json({
+      userId: context.userId,
+      includePosts: query?.includePosts ?? false,
+    }),
+});
+
+const result = await getUser.handle(
+  new Request("https://example.com/users/123?includePosts=true"),
+);
+```
+
+#### Constructor configuration
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `path` | `string` | Yes | Route pathname. Repeated or trailing slashes are normalized. |
+| `method` | `HttpMethod` | Yes | HTTP method handled by the endpoint. |
+| `input.querySchema` | Zod schema | No | Validates parsed URL query parameters. |
+| `input.dataSchema` | Zod schema | No | Validates a JSON request body. |
+| `context` | `EndpointContextFactory` | No | Creates request-scoped context before middleware runs. |
+| `middleware` | `EndpointMiddleware[]` | No | Sequential hooks executed before validation and the handler. |
+| `handler` | `EndpointHandler` | Yes | Produces the endpoint result. |
+
+The instance exposes:
+
+- `path`: normalized endpoint pathname.
+- `method`: configured HTTP method.
+- `config`: a frozen, shallow snapshot of the configuration.
+- `handle(request)`: executes the endpoint lifecycle and returns the awaited
+  handler result.
+
+`handle()` executes in this order: create response helpers, resolve context,
+run middleware, validate the query, validate the JSON body, then call the
+handler. If no schema is configured, `query` or `data` is `undefined`.
+Repeated query keys are represented as arrays. A body schema requires a JSON
+content type (`application/json` or a structured `+json` type). Validation
+failures throw configured endpoint errors with `400` status. Errors from
+context, middleware, or the handler are propagated unchanged.
+
+#### Handler and middleware arguments
+
+Both handlers and middleware receive `request`, `context`, and `response`.
+Handlers additionally receive parsed `query` and `data` values:
+
+```ts
+const endpoint = new EndpointDefinition({
+  path: "/health",
+  method: "GET",
+  handler: ({ request, query, data, context, response }) => {
+    return response.json({ ok: true });
+  },
+});
+```
+
+The response helper methods are:
+
+| Method | Description |
+| --- | --- |
+| `response.json(body, init?)` | Creates a JSON response and sets `application/json; charset=utf-8` when absent. |
+| `response.text(body, init?)` | Creates a plain-text response. |
+| `response.html(body, init?)` | Creates an HTML response. |
+| `response.redirect(url, status?)` | Creates a redirect; the default status is `302`. |
+| `response.raw(response)` | Returns an existing native `Response` unchanged. |
+
+### `Endpoint`
+
+`Endpoint` is a reusable endpoint factory. It shares a base path, context
+factory, and middleware across concrete routes.
+
+```ts
+import { Endpoint } from "@tolha/react/server";
+
+const api = new Endpoint({
+  basePath: "/api",
+  context: ({ request }) => ({
+    requestId: request.headers.get("x-request-id"),
+  }),
+  middleware: [
+    ({ request }) => {
+      console.log(request.method);
+    },
+  ],
+});
+
+const listUsers = api.create({
+  path: "/users",
+  method: "GET",
+  handler: ({ context, response }) =>
+    response.json({ requestId: context.requestId }),
+});
+// listUsers.path is "/api/users"
+```
+
+`Endpoint` exposes `basePath`, `config`, and `create(config)`.
+`create()` joins and normalizes the factory base path with the route path.
+Factory middleware runs before route middleware by default. Set
+`middlewareMode: "override"` on a route to use only that route's middleware.
+A route context factory replaces the factory context factory for that route.
+
+### Endpoint types
+
+- `HttpMethod`: `"GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" | "CONNECT" | "TRACE"`.
+- `EndpointContext`: object type for request-scoped values.
+- `EndpointContextFactory<TContext>`: synchronous or asynchronous context factory.
+- `EndpointMiddlewareArgs<TContext>` and `EndpointMiddleware<TContext>`:
+  middleware arguments and hook types.
+- `EndpointHandlerArgs<TQuery, TData, TContext>` and
+  `EndpointHandler<TQuery, TData, TResult, TContext>`: handler arguments and
+  return type.
+- `JoinPaths<TBasePath, TPath>`: compile-time joined route path.
+
+Use `EndpointDefinition` and `Endpoint` with a server adapter that performs
+route matching and calls `handle()`. The endpoint utility does not enforce
+request body size limits, authenticate requests, or send an error response
+automatically.
+
+---
+
 ## IP Address Utilities
 
 These utilities sanitize IP address strings and attempt to determine a client's IP address from a request.
@@ -168,7 +348,7 @@ Checks whether a string matches one of the IPv4 or IPv6 patterns supported by th
 **Returns:** `string | null`
 
 ```ts
-import { sanitizeIp } from "@tolha/react";
+import { sanitizeIp } from "@tolha/react/server";
 
 sanitizeIp("192.168.1.10"); // "192.168.1.10"
 sanitizeIp("not-an-ip"); // null
@@ -190,7 +370,7 @@ Attempts to determine the client IP address from a request.
 **Returns:** `string`
 
 ```ts
-import { getClientIp } from "@tolha/react";
+import { getClientIp } from "@tolha/react/server";
 
 export function GET(request: Request) {
   const clientIp = getClientIp(request);
@@ -234,7 +414,7 @@ Retrieves a named HTTP header from a Fetch-style `Request` or a request object w
 **Returns:** `string | null`
 
 ```ts
-import { getHeader } from "@tolha/react";
+import { getHeader } from "@tolha/react/server";
 
 export function GET(request: Request) {
   const authorization = getHeader(request, "Authorization");
@@ -254,10 +434,6 @@ export function GET(request: Request) {
 - Joins array values with `", "`.
 - Returns `null` when headers or the requested value are unavailable.
 
-### Internal helper: `isHeadersWithGet`
-
-This helper checks whether a value has a callable `.get()` method. It is an internal implementation detail and is not part of the documented public API unless explicitly exported.
-
 ---
 
 ## User-Agent Detection
@@ -275,7 +451,7 @@ The user-agent utility parses an HTTP request's `User-Agent` header and returns 
 **Returns:** `UserAgentInfo`
 
 ```ts
-import { getUserAgent } from "@tolha/react";
+import { getUserAgent } from "@tolha/react/server";
 
 export function GET(request: Request) {
   const userAgent = getUserAgent(request);
@@ -381,7 +557,7 @@ Creates a reusable rate limiter.
 **Throws:** `TypeError` if the configuration contains invalid values.
 
 ```ts
-import { createRateLimiter } from "@tolha/react";
+import { createRateLimiter } from "@tolha/react/server";
 
 const loginLimiter = createRateLimiter({
   windowMs: 60_000,
@@ -456,7 +632,7 @@ Use consistent namespaces for operations that should share the same rate limit. 
 The default in-memory implementation of `RateLimitStore`.
 
 ```ts
-import { MemoryRateLimitStore } from "@tolha/react";
+import { MemoryRateLimitStore } from "@tolha/react/server";
 
 const store = new MemoryRateLimitStore(60_000);
 ```
@@ -477,7 +653,7 @@ import type {
   RateLimitStore,
   RateLimitStoreOptions,
   RateLimitStoreResult,
-} from "@tolha/react";
+} from "@tolha/react/server";
 
 const customStore: RateLimitStore = {
   consume(key: string, options: RateLimitStoreOptions): RateLimitStoreResult {
@@ -633,6 +809,7 @@ The `defaultErrorPreset` export contains the following presets:
 | Key                 | Code                | HTTP status | Priority |
 | ------------------- | ------------------- | ----------: | -------- |
 | `UNKNOWN`           | `UNKNOWN`           |         500 | `high`   |
+| `BAD_REQUEST`       | `BAD_REQUEST`       |         400 | `low`    |
 | `TOO_MANY_REQUESTS` | `TOO_MANY_REQUESTS` |         429 | `medium` |
 | `INVALID_REQUEST`   | `INVALID_REQUEST`   |         400 | `low`    |
 | `UNAUTHORIZED`      | `UNAUTHORIZED`      |         401 | `medium` |
@@ -691,7 +868,9 @@ This is a structural brand check; it should not be treated as proof that an erro
 
 ## TypeScript Types
 
-The following public types are used throughout the APIs. Export them from the package entry point if you want consumers to import them directly.
+The following public types are exported from the entry point shown in the
+Imports section. Import root types from `@tolha/react` and server types from
+`@tolha/react/server`.
 
 ### Rate-limit types
 

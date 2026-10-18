@@ -1,21 +1,32 @@
 # Security Policy
 
+This policy applies to `@tolha/react`, including the root package and the
+`@tolha/react/server` entry point. The library provides reusable primitives;
+the application integrating them remains responsible for authentication,
+authorization, deployment hardening, and operational monitoring.
+
 ## Supported Versions
 
-Security fixes are intended for the latest supported release.
+The latest published release is the only version targeted for security fixes.
+The package currently requires Node.js 20 or newer.
 
 Until the first stable release (`1.0.0`) is published, formal support commitments have not yet been established. Users are encouraged to upgrade to the latest available version.
 
 | Version        | Supported                          |
 | -------------- | ---------------------------------- |
-| Latest release | Intended to receive security fixes |
-| Older releases | Not guaranteed                     |
+| Latest release | Security fixes targeted            |
+| Older releases | Not supported                      |
 
 ## Reporting a Vulnerability
 
 Please do not disclose vulnerability details, exploit code, or sensitive security information in a public issue.
 
-Report vulnerabilities privately through the security contact configured in this repository or its hosting platform. If GitHub Private Vulnerability Reporting is enabled, you can use the repository's **Security** tab to submit a report.
+Report vulnerabilities privately using
+[GitHub's private vulnerability reporting](https://github.com/mdtolhabinashraf/react/security/advisories/new),
+if available for the repository. If that form is unavailable, contact the
+maintainer privately through the contact options on the
+[repository](https://github.com/mdtolhabinashraf/react); do not create a
+public issue.
 
 Include the following information when possible:
 
@@ -43,6 +54,24 @@ Please allow maintainers reasonable time to investigate, develop a fix, and coor
 - Use a shared, persistent store for distributed deployments.
 - Custom rate-limit stores must implement atomic request consumption to avoid race conditions.
 - Choose appropriate limits and time windows for the protected operation.
+- Rate limiting is not authentication. Apply it after identifying the
+  relevant client or account and combine it with authorization controls.
+
+### Endpoint Utilities and Request Bodies
+
+- `EndpointDefinition.handle()` validates configured query and JSON body
+  schemas, but it does not authenticate a request or authorize an operation.
+- Run authentication and authorization middleware before sensitive handlers.
+- Enforce request body-size limits in the framework, reverse proxy, or server
+  adapter before parsing untrusted bodies. Zod validation does not limit body
+  size.
+- Treat context factories as trusted server-side code. Do not copy
+  client-provided values into an authenticated context without verification.
+- Endpoint errors are propagated to the caller. Server adapters must convert
+  expected errors into safe responses and avoid exposing stack traces.
+- Use `response.json`, `response.text`, and `response.html` only with content
+  that is safe for the response context. Escape or sanitize untrusted values
+  before embedding them in HTML.
 
 ### Client IP Address Handling
 
@@ -60,16 +89,32 @@ Please allow maintainers reasonable time to investigate, develop a fix, and coor
 - Avoid returning internal stack traces, database details, filesystem paths, credentials, or other sensitive implementation details to clients.
 - Use generic error responses for unexpected server errors.
 - Include error details in responses only when they are safe to disclose.
+- `ErrorResponse()` intentionally replaces unexpected errors with a generic
+  internal-server response. Preserve that behavior at framework boundaries.
 
 ### Input Validation
 
 - Validate and sanitize untrusted input at application boundaries.
 - Do not assume that parsing an IP address, request header, UUID, or other input establishes that the input is trustworthy.
 - Apply application-specific validation and authorization checks where needed.
+- Zod schemas validate shape and values; they do not make data trusted or
+  prevent business-logic abuse.
+
+### Dependency and Supply-Chain Hygiene
+
+- Install the package from the official npm package and verify the package
+  version before deployment.
+- Keep `@tolha/react`, `zod`, Node.js, and the package manager updated within
+  your compatibility requirements.
+- Review lockfile changes before merging and run the repository's typecheck,
+  build, and test commands after dependency updates.
 
 ## Scope
 
-This policy covers security vulnerabilities in the `@tolha/react` package itself, including its published utilities and their documented behavior.
+This policy covers security vulnerabilities in the `@tolha/react` package
+itself, including its published utilities and documented behavior. It does
+not guarantee the security of applications, middleware, reverse proxies,
+custom rate-limit stores, or other services that consume the package.
 
 Application-specific configuration, deployment infrastructure, and third-party services may require separate security reviews.
 

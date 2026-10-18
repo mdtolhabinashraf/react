@@ -42,6 +42,12 @@ export const defaultErrorPreset = {
     status: 500,
     priority: "high",
   },
+  BAD_REQUEST: {
+    code: "BAD_REQUEST",
+    message: "The request is malformed or invalid.",
+    status: 400,
+    priority: "low",
+  },
   TOO_MANY_REQUESTS: {
     code: "TOO_MANY_REQUESTS",
     message: "Too many requests. Please try again later.",
