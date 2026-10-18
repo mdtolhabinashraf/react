@@ -1,6 +1,6 @@
 {
   "name": "@tolha/react",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "A utility library for React",
   "license": "MIT",
   "author": "Md. Tolha Bin Ashraf",
@@ -51,5 +51,8 @@
   "keywords": [
     "react",
     "utility"
-  ]
+  ],
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
 }
