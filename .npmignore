@@ -1,0 +1,31 @@
+# Source code and tests
+src/
+tests/
+test/
+**/*.test.*
+**/*.spec.*
+coverage/
+
+# GitHub and editor configuration
+.github/
+.vscode/
+.idea/
+.gitignore
+.editorconfig
+
+# TypeScript development configuration
+tsconfig.json
+tsconfig.*.json
+*.tsbuildinfo
+
+# Test and lint configuration
+vitest.config.*
+eslint.config.*
+.prettierrc*
+.prettierignore
+
+# Environment and logs
+.env
+.env.*
+npm-debug.log*
+*.tgz
