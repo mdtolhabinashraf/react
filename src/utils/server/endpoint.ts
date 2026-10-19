@@ -6,6 +6,8 @@
  */
 
 import { z } from "zod";
+import type { HttpMethod } from "apexa";
+import type { responseBodyType } from "../internal/response-helpers.js";
 import { createAppError } from "../app-error.js";
 import {
   createResponseHelpers,
@@ -17,30 +19,16 @@ const EndpointError = createAppError({
 });
 
 /**
- * HTTP methods supported by endpoint definitions.
- */
-export type HttpMethod =
-  | "GET"
-  | "POST"
-  | "PUT"
-  | "PATCH"
-  | "DELETE"
-  | "HEAD"
-  | "OPTIONS"
-  | "CONNECT"
-  | "TRACE";
-
-/**
  * A Zod schema accepted by an endpoint for input validation.
  */
-type Schema = z.ZodType;
+export type Schema = z.ZodType;
 
 /**
  * Infers the parsed output of a Zod schema.
  *
  * Resolves to undefined when no schema is configured.
  */
-type InferSchema<TSchema> = TSchema extends Schema
+export type InferSchema<TSchema> = TSchema extends Schema
   ? z.output<TSchema>
   : undefined;
 
@@ -55,15 +43,54 @@ export type EndpointContext = object;
 /**
  * Creates request-scoped context for an endpoint.
  *
- * The returned context must be created from trusted server-side sources.
- * Do not treat client-provided headers or request data as authenticated
- * or otherwise trusted without verifying them.
+ * Context must be created from trusted server-side sources. Client-provided
+ * request data must not be trusted without appropriate verification.
  *
  * @typeParam TContext - The context returned by the factory.
  */
 export type EndpointContextFactory<
   TContext extends EndpointContext = EndpointContext,
 > = (args: { readonly request: Request }) => TContext | Promise<TContext>;
+
+/**
+ * Extracts the declared response body type from a typed Response.
+ *
+ * Falls back to the original result type when no response body type
+ * is declared.
+ */
+type InferResponseBody<TResult> = TResult extends {
+  readonly [responseBodyType]?: infer TBody;
+}
+  ? NonNullable<TBody>
+  : TResult;
+
+/**
+ * Methods that cannot declare a request body in this endpoint API.
+ */
+type BodylessMethod = "GET" | "HEAD";
+
+/**
+ * Optional input schemas supported by an HTTP method.
+ *
+ * Query validation is supported by every HTTP method.
+ * GET and HEAD cannot declare a data schema.
+ *
+ * The conditional is distributive so individual method literals retain
+ * their method-specific input restrictions.
+ */
+export type EndpointInput<
+  TMethod extends HttpMethod,
+  TQuery extends Schema | undefined = undefined,
+  TData extends Schema | undefined = undefined,
+> = TMethod extends BodylessMethod
+  ? {
+      readonly querySchema?: TQuery;
+      readonly dataSchema?: never;
+    }
+  : {
+      readonly querySchema?: TQuery;
+      readonly dataSchema?: TData;
+    };
 
 /**
  * Arguments supplied to endpoint middleware hooks.
@@ -82,8 +109,7 @@ export type EndpointMiddlewareArgs<
  * A middleware hook executed before endpoint input validation.
  *
  * Middleware executes sequentially in configured order. Throwing an error
- * rejects endpoint execution and prevents subsequent middleware, validation,
- * and the handler from running.
+ * prevents subsequent middleware, validation, and the handler from running.
  *
  * @typeParam TContext - The context available to the middleware.
  */
@@ -131,23 +157,6 @@ export type EndpointHandler<
 ) => TResult | Promise<TResult>;
 
 /**
- * Optional schemas used to validate endpoint query and body inputs.
- *
- * Query parameters are represented as strings or arrays of strings before
- * validation. Zod schemas can coerce or transform them as needed.
- *
- * @typeParam TQuery - Query schema.
- * @typeParam TData - JSON body schema.
- */
-type EndpointInput<
-  TQuery extends Schema | undefined = undefined,
-  TData extends Schema | undefined = undefined,
-> = {
-  readonly querySchema?: TQuery;
-  readonly dataSchema?: TData;
-};
-
-/**
  * Configuration for a concrete endpoint.
  *
  * @typeParam TPath - Endpoint path.
@@ -157,7 +166,7 @@ type EndpointInput<
  * @typeParam TResult - Handler result.
  * @typeParam TContext - Request-scoped context.
  */
-type EndpointConfig<
+export type EndpointConfig<
   TPath extends string = string,
   TMethod extends HttpMethod = HttpMethod,
   TQuery extends Schema | undefined = undefined,
@@ -167,7 +176,7 @@ type EndpointConfig<
 > = {
   readonly path: TPath;
   readonly method: TMethod;
-  readonly input?: EndpointInput<TQuery, TData>;
+  readonly input?: EndpointInput<TMethod, TQuery, TData>;
   readonly context?: EndpointContextFactory<TContext>;
   readonly middleware?: readonly EndpointMiddleware<TContext>[];
   readonly handler: EndpointHandler<
@@ -184,7 +193,7 @@ type EndpointConfig<
  * @typeParam TBasePath - Shared base path.
  * @typeParam TContext - Registry-provided context.
  */
-type EndpointRegistryConfig<
+export type EndpointRegistryConfig<
   TBasePath extends string = string,
   TContext extends EndpointContext = object,
 > = {
@@ -199,7 +208,7 @@ type EndpointRegistryConfig<
  * - extend: Execute registry middleware before route-specific middleware.
  * - override: Execute only route-specific middleware.
  */
-type MiddlewareMode = "extend" | "override";
+export type MiddlewareMode = "extend" | "override";
 
 /**
  * Configuration for creating an endpoint through an EndpointRegistry.
@@ -212,7 +221,7 @@ type MiddlewareMode = "extend" | "override";
  * @typeParam TFactoryContext - Registry-provided context.
  * @typeParam TRouteContext - Route context.
  */
-type EndpointRouteConfig<
+export type EndpointRouteConfig<
   TPath extends string,
   TMethod extends HttpMethod,
   TQuery extends Schema | undefined,
@@ -222,9 +231,10 @@ type EndpointRouteConfig<
   TRouteContext extends EndpointContext = EndpointContext,
 > = Omit<
   EndpointConfig<TPath, TMethod, TQuery, TData, TResult, TRouteContext>,
-  "path" | "context" | "middleware"
+  "path" | "context" | "middleware" | "input"
 > & {
   readonly path: TPath;
+  readonly input?: EndpointInput<TMethod, TQuery, TData>;
   readonly context?: EndpointContextFactory<TRouteContext>;
   readonly middleware?: readonly EndpointMiddleware<TRouteContext>[];
   readonly middlewareMode?: MiddlewareMode;
@@ -250,7 +260,7 @@ type EnsureLeadingSlash<T extends string> = T extends ""
  * Joins a base path and a route path at the type level.
  *
  * @typeParam TBasePath - Base path.
- * @typeParam TPath - Relative route path.
+ * @typeParam TPath - Route path.
  */
 export type JoinPaths<
   TBasePath extends string,
@@ -266,21 +276,15 @@ export type JoinPaths<
 /**
  * Normalizes a URL pathname by removing empty segments and ensuring
  * that non-root paths begin with exactly one slash.
- *
- * @param path - Path to normalize.
- * @returns The normalized pathname.
  */
 function normalizePath(path: string): string {
   const segments = path.split("/").filter(Boolean);
+
   return segments.length === 0 ? "/" : `/${segments.join("/")}`;
 }
 
 /**
  * Joins a base path and a route path.
- *
- * @param basePath - Optional base pathname.
- * @param path - Route pathname.
- * @returns The normalized joined pathname.
  */
 function joinPaths(basePath: string | undefined, path: string): string {
   const base = normalizePath(basePath ?? "");
@@ -289,6 +293,7 @@ function joinPaths(basePath: string | undefined, path: string): string {
   if (base === "/") {
     return route;
   }
+
   if (route === "/") {
     return base;
   }
@@ -300,14 +305,8 @@ function joinPaths(basePath: string | undefined, path: string): string {
  * Converts URL query parameters into a plain object while preserving
  * repeated keys as arrays.
  *
- * Single-value parameters remain strings. Repeated parameters become
- * arrays in their original order.
- *
  * A null-prototype object prevents untrusted query keys from interacting
  * with inherited object properties.
- *
- * @param searchParams - Query parameters from the request URL.
- * @returns A query object suitable for Zod validation.
  */
 function parseQueryParams(
   searchParams: URLSearchParams,
@@ -334,23 +333,19 @@ function parseQueryParams(
  *
  * Supports application/json and structured JSON media types such as
  * application/problem+json.
- *
- * @param request - Incoming request.
- * @returns Whether the content type is JSON-compatible.
  */
 function hasJsonContentType(request: Request): boolean {
   const contentTypeHeader = request.headers.get("content-type");
+
   if (contentTypeHeader === null) {
     return false;
   }
 
-  const parts = contentTypeHeader.split(";", 1);
-  const firstPart = parts[0];
-  if (firstPart === undefined) {
+  const contentType = contentTypeHeader.split(";", 1)[0]?.trim().toLowerCase();
+
+  if (contentType === undefined) {
     return false;
   }
-
-  const contentType = firstPart.trim().toLowerCase();
 
   return (
     contentType === "application/json" ||
@@ -401,10 +396,9 @@ export class Endpoint<
   public readonly method: TMethod;
 
   /**
-   * Creates an endpoint.
+   * Creates a concrete endpoint.
    *
    * Configuration arrays and objects are shallowly copied and frozen.
-   * Nested schemas and function references are not recursively frozen.
    *
    * @param config - Endpoint configuration.
    */
@@ -414,10 +408,36 @@ export class Endpoint<
     this.path = normalizePath(config.path) as TPath;
     this.method = config.method;
 
-    const input =
+    // Runtime protection for JavaScript callers and unsafe type assertions.
+    if (
+      (this.method === "GET" || this.method === "HEAD") &&
+      config.input?.dataSchema !== undefined
+    ) {
+      throw new TypeError(
+        `${this.method} endpoints cannot declare a dataSchema.`,
+      );
+    }
+
+    const input: EndpointConfig<
+      TPath,
+      TMethod,
+      TQuery,
+      TData,
+      TResult,
+      TContext
+    >["input"] =
       config.input === undefined
         ? undefined
-        : Object.freeze({ ...config.input });
+        : (Object.freeze({
+            ...config.input,
+          }) as EndpointConfig<
+            TPath,
+            TMethod,
+            TQuery,
+            TData,
+            TResult,
+            TContext
+          >["input"]);
 
     this.config = Object.freeze({
       ...config,
@@ -435,24 +455,24 @@ export class Endpoint<
    *
    * 1. Create response helpers.
    * 2. Resolve request-scoped context.
-   * 3. Execute middleware hooks sequentially.
+   * 3. Execute middleware sequentially.
    * 4. Parse and validate query parameters, if configured.
    * 5. Parse and validate the JSON body, if configured.
    * 6. Execute the endpoint handler.
    *
-   * Errors are propagated to the caller. A server adapter should translate
+   * Errors propagate to the caller. The server adapter should translate
    * known application errors into appropriate HTTP responses and safely
    * handle unexpected errors.
    *
-   * Body-size limits should be enforced by the server or adapter before
+   * Enforce request-body size limits at the server or adapter layer before
    * consuming untrusted request bodies.
    *
    * @param request - Fetch API request.
    * @returns The resolved handler result.
-   * @throws Application errors when input validation or execution fails.
    */
   public async handle(request: Request): Promise<Awaited<TResult>> {
     const response = createResponseHelpers();
+
     const context = this.config.context
       ? await this.config.context({ request })
       : ({} as TContext);
@@ -482,6 +502,8 @@ export class Endpoint<
       query = result.data;
     }
 
+    // Body parsing is driven exclusively by the configured body schema.
+    // GET and HEAD configurations cannot declare one.
     if (dataSchema !== undefined) {
       if (!hasJsonContentType(request)) {
         throw new EndpointError("BAD_REQUEST");
@@ -518,16 +540,27 @@ export class Endpoint<
 
     return await this.config.handler(args);
   }
+
+  /**
+   * Type-only endpoint metadata used for client inference.
+   */
+  declare public readonly $infer: {
+    readonly path: TPath;
+    readonly method: TMethod;
+    readonly query: InferSchema<TQuery>;
+    readonly data: InferSchema<TData>;
+    readonly result: InferResponseBody<Awaited<TResult>>;
+  };
 }
 
 /**
  * Registry for creating and configuring endpoints.
  *
- * Shares a base path, optional request context factory, and middleware hooks
- * across multiple endpoints.
+ * Shares a base path, optional request context factory, and middleware
+ * hooks across multiple endpoints.
  *
- * Registry middleware executes before route-specific middleware by default. Route
- * context factories may override the registry context completely.
+ * Registry middleware executes before route-specific middleware by default.
+ * Route context factories override the registry context when supplied.
  *
  * @typeParam TBasePath - Shared base pathname.
  * @typeParam TContext - Registry-provided request context.
@@ -553,6 +586,7 @@ export class EndpointRegistry<
    */
   public constructor(config: EndpointRegistryConfig<TBasePath, TContext> = {}) {
     this.basePath = normalizePath(config.basePath ?? "") as TBasePath;
+
     this.config = Object.freeze({
       ...config,
       basePath: this.basePath,
@@ -564,7 +598,7 @@ export class EndpointRegistry<
    * Creates a concrete endpoint using registry defaults.
    *
    * The route path is joined to the registry base path. The resulting
-   * endpoint retains its literal path, method, schema, result, and context
+   * endpoint retains its literal path, method, schemas, result, and context
    * types.
    *
    * @typeParam TPath - Relative route path.
