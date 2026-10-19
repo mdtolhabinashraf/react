@@ -148,7 +148,7 @@ type EndpointInput<
 };
 
 /**
- * Configuration for a concrete endpoint definition.
+ * Configuration for a concrete endpoint.
  *
  * @typeParam TPath - Endpoint path.
  * @typeParam TMethod - HTTP method.
@@ -179,12 +179,12 @@ type EndpointConfig<
 };
 
 /**
- * Shared configuration for an endpoint factory.
+ * Shared configuration for an endpoint registry.
  *
  * @typeParam TBasePath - Shared base path.
- * @typeParam TContext - Factory-provided context.
+ * @typeParam TContext - Registry-provided context.
  */
-type EndpointFactoryConfig<
+type EndpointRegistryConfig<
   TBasePath extends string = string,
   TContext extends EndpointContext = object,
 > = {
@@ -194,22 +194,22 @@ type EndpointFactoryConfig<
 };
 
 /**
- * Controls whether factory middleware hooks are inherited by a route.
+ * Controls whether registry middleware hooks are inherited by a route.
  *
- * - extend: Execute factory middleware before route-specific middleware.
+ * - extend: Execute registry middleware before route-specific middleware.
  * - override: Execute only route-specific middleware.
  */
 type MiddlewareMode = "extend" | "override";
 
 /**
- * Configuration for creating an endpoint through an Endpoint factory.
+ * Configuration for creating an endpoint through an EndpointRegistry.
  *
  * @typeParam TPath - Relative route path.
  * @typeParam TMethod - HTTP method.
  * @typeParam TQuery - Query schema.
  * @typeParam TData - JSON body schema.
  * @typeParam TResult - Handler result.
- * @typeParam TFactoryContext - Factory-provided context.
+ * @typeParam TFactoryContext - Registry-provided context.
  * @typeParam TRouteContext - Route context.
  */
 type EndpointRouteConfig<
@@ -359,7 +359,7 @@ function hasJsonContentType(request: Request): boolean {
 }
 
 /**
- * A concrete endpoint definition.
+ * A concrete endpoint.
  *
  * Validates request inputs, resolves request-scoped context, executes
  * middleware hooks, and invokes the configured handler.
@@ -375,7 +375,7 @@ function hasJsonContentType(request: Request): boolean {
  * @typeParam TResult - Handler result.
  * @typeParam TContext - Request-scoped context.
  */
-export class EndpointDefinition<
+export class Endpoint<
   TPath extends string = string,
   TMethod extends HttpMethod = HttpMethod,
   TQuery extends Schema | undefined = undefined,
@@ -401,7 +401,7 @@ export class EndpointDefinition<
   public readonly method: TMethod;
 
   /**
-   * Creates an endpoint definition.
+   * Creates an endpoint.
    *
    * Configuration arrays and objects are shallowly copied and frozen.
    * Nested schemas and function references are not recursively frozen.
@@ -521,37 +521,37 @@ export class EndpointDefinition<
 }
 
 /**
- * Reusable endpoint factory.
+ * Registry for creating and configuring endpoints.
  *
  * Shares a base path, optional request context factory, and middleware hooks
- * across multiple endpoint definitions.
+ * across multiple endpoints.
  *
- * Factory middleware executes before route-specific middleware by default. Route
- * context factories may override the factory context completely.
+ * Registry middleware executes before route-specific middleware by default. Route
+ * context factories may override the registry context completely.
  *
  * @typeParam TBasePath - Shared base pathname.
- * @typeParam TContext - Factory-provided request context.
+ * @typeParam TContext - Registry-provided request context.
  */
-export class Endpoint<
+export class EndpointRegistry<
   TBasePath extends string = "",
   TContext extends EndpointContext = object,
 > {
   /**
-   * Normalized base pathname shared by this factory's routes.
+   * Normalized base pathname shared by this registry's routes.
    */
   public readonly basePath: TBasePath;
 
   /**
-   * Immutable snapshot of the factory configuration.
+   * Immutable snapshot of the registry configuration.
    */
-  public readonly config: Readonly<EndpointFactoryConfig<TBasePath, TContext>>;
+  public readonly config: Readonly<EndpointRegistryConfig<TBasePath, TContext>>;
 
   /**
-   * Creates a reusable endpoint factory.
+   * Creates an endpoint registry.
    *
-   * @param config - Shared factory configuration.
+   * @param config - Shared registry configuration.
    */
-  public constructor(config: EndpointFactoryConfig<TBasePath, TContext> = {}) {
+  public constructor(config: EndpointRegistryConfig<TBasePath, TContext> = {}) {
     this.basePath = normalizePath(config.basePath ?? "") as TBasePath;
     this.config = Object.freeze({
       ...config,
@@ -561,9 +561,9 @@ export class Endpoint<
   }
 
   /**
-   * Creates a concrete endpoint using factory defaults.
+   * Creates a concrete endpoint using registry defaults.
    *
-   * The route path is joined to the factory base path. The resulting
+   * The route path is joined to the registry base path. The resulting
    * endpoint retains its literal path, method, schema, result, and context
    * types.
    *
@@ -575,7 +575,7 @@ export class Endpoint<
    * @typeParam TRouteContext - Route context type.
    *
    * @param config - Route configuration and optional overrides.
-   * @returns A concrete endpoint definition.
+   * @returns A concrete endpoint.
    */
   public create<
     const TPath extends string,
@@ -594,7 +594,7 @@ export class Endpoint<
       TContext,
       TRouteContext
     >,
-  ): EndpointDefinition<
+  ): Endpoint<
     JoinPaths<TBasePath, TPath>,
     TMethod,
     TQuery,
@@ -637,6 +637,6 @@ export class Endpoint<
       middleware: [...inheritedMiddleware, ...routeMiddleware],
     };
 
-    return new EndpointDefinition(resolvedConfig);
+    return new Endpoint(resolvedConfig);
   }
 }
