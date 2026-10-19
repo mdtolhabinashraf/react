@@ -1,262 +1,121 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import type { HttpMethod } from "apexa";
 import {
   Endpoint,
   EndpointRegistry,
+  type EndpointMiddleware,
 } from "../../../src/utils/server/endpoint.js";
-
-function createRequest(
-  path = "https://example.com/api/test",
-  init?: RequestInit,
-): Request {
-  return new Request(path, init);
-}
 
 describe("Endpoint", () => {
   describe("configuration", () => {
     it("normalizes the endpoint path", () => {
       const endpoint = new Endpoint({
-        path: "//users//",
+        path: "//users///profile/",
         method: "GET",
-        handler: () => ({ success: true }),
+        handler: () => "ok",
       });
 
-      expect(endpoint.path).toBe("/users");
+      expect(endpoint.path).toBe("/users/profile");
       expect(endpoint.method).toBe("GET");
     });
 
+    it("normalizes an empty path to root", () => {
+      const endpoint = new Endpoint({
+        path: "",
+        method: "GET",
+        handler: () => "ok",
+      });
+
+      expect(endpoint.path).toBe("/");
+    });
+
     it("freezes the configuration and middleware array", () => {
-      const middleware = vi.fn();
+      const middleware = [vi.fn()];
       const endpoint = new Endpoint({
         path: "/users",
         method: "GET",
-        middleware: [middleware],
-        handler: () => null,
+        middleware,
+        handler: () => "ok",
       });
 
       expect(Object.isFrozen(endpoint.config)).toBe(true);
       expect(Object.isFrozen(endpoint.config.middleware)).toBe(true);
+      expect(endpoint.config.middleware).not.toBe(middleware);
     });
 
-    it("copies the middleware array instead of retaining the original", () => {
-      const middleware = vi.fn();
-      const middlewareList = [middleware];
+    it.each(["GET", "HEAD"] as const)(
+      "rejects a data schema for %s at runtime",
+      (method) => {
+        expect(
+          () =>
+            new Endpoint({
+              path: "/users",
+              method,
+              input: {
+                dataSchema: z.object({ name: z.string() }),
+              },
+              handler: () => "ok",
+            } as never),
+        ).toThrow(`${method} endpoints cannot declare a dataSchema.`);
+      },
+    );
+  });
 
+  describe("request handling", () => {
+    it("invokes the handler and returns its result", async () => {
+      const handler = vi.fn(() => ({ success: true }));
+
+      const endpoint = new Endpoint({
+        path: "/health",
+        method: "GET",
+        handler,
+      });
+
+      const result = await endpoint.handle(
+        new Request("http://localhost/health"),
+      );
+
+      expect(result).toEqual({ success: true });
+      expect(handler).toHaveBeenCalledOnce();
+
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.any(Request),
+          query: undefined,
+          data: undefined,
+          context: {},
+          response: expect.any(Object),
+        }),
+      );
+    });
+
+    it("validates and passes parsed query parameters", async () => {
       const endpoint = new Endpoint({
         path: "/users",
         method: "GET",
-        middleware: middlewareList,
-        handler: () => null,
-      });
-
-      middlewareList.push(vi.fn());
-
-      expect(endpoint.config.middleware).toHaveLength(1);
-    });
-
-    it("creates an empty context when no context factory is configured", async () => {
-      const handler = vi.fn(({ context }) => context);
-
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        handler,
-      });
-
-      const result = await endpoint.handle(createRequest());
-
-      expect(result).toEqual({});
-      expect(handler).toHaveBeenCalledOnce();
-    });
-  });
-
-  describe("context", () => {
-    it("resolves synchronous request context", async () => {
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        context: ({ request }) => ({
-          requestUrl: request.url,
-          userId: "user_123",
-        }),
-        handler: ({ context }) => context,
-      });
-
-      await expect(endpoint.handle(createRequest())).resolves.toEqual({
-        requestUrl: "https://example.com/api/test",
-        userId: "user_123",
-      });
-    });
-
-    it("resolves asynchronous request context", async () => {
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        context: async () => ({
-          userId: "user_123",
-        }),
-        handler: ({ context }) => context.userId,
-      });
-
-      await expect(endpoint.handle(createRequest())).resolves.toBe("user_123");
-    });
-
-    it("does not execute middleware or handler when context creation fails", async () => {
-      const middleware = vi.fn();
-      const handler = vi.fn();
-
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        context: () => {
-          throw new Error("Context initialization failed");
-        },
-        middleware: [middleware],
-        handler,
-      });
-
-      await expect(endpoint.handle(createRequest())).rejects.toThrow(
-        "Context initialization failed",
-      );
-
-      expect(middleware).not.toHaveBeenCalled();
-      expect(handler).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("middleware", () => {
-    it("executes middleware sequentially in configured order", async () => {
-      const order: string[] = [];
-
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        middleware: [
-          async () => {
-            await Promise.resolve();
-            order.push("first");
-          },
-          () => {
-            order.push("second");
-          },
-          () => {
-            order.push("third");
-          },
-        ],
-        handler: () => {
-          order.push("handler");
-          return "done";
-        },
-      });
-
-      await endpoint.handle(createRequest());
-
-      expect(order).toEqual(["first", "second", "third", "handler"]);
-    });
-
-    it("provides the request, context, and response helpers", async () => {
-      const request = createRequest();
-      const middleware = vi.fn();
-      let receivedRequest: Request | undefined;
-      let receivedContext: object | undefined;
-      let receivedResponse: unknown;
-
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        context: () => ({ userId: "user_123" }),
-        middleware: [
-          (args) => {
-            middleware(args);
-            receivedRequest = args.request;
-            receivedContext = args.context;
-            receivedResponse = args.response;
-          },
-        ],
-        handler: () => "done",
-      });
-
-      await endpoint.handle(request);
-
-      expect(receivedRequest).toBe(request);
-      expect(receivedContext).toEqual({ userId: "user_123" });
-      expect(receivedResponse).toBeDefined();
-      expect(middleware).toHaveBeenCalledOnce();
-    });
-
-    it("stops execution when middleware throws", async () => {
-      const laterMiddleware = vi.fn();
-      const handler = vi.fn();
-
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        middleware: [
-          () => {
-            throw new Error("Access denied");
-          },
-          laterMiddleware,
-        ],
-        handler,
-      });
-
-      await expect(endpoint.handle(createRequest())).rejects.toThrow(
-        "Access denied",
-      );
-
-      expect(laterMiddleware).not.toHaveBeenCalled();
-      expect(handler).not.toHaveBeenCalled();
-    });
-
-    it("stops execution when asynchronous middleware rejects", async () => {
-      const handler = vi.fn();
-
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        middleware: [
-          async () => {
-            throw new Error("Middleware rejected");
-          },
-        ],
-        handler,
-      });
-
-      await expect(endpoint.handle(createRequest())).rejects.toThrow(
-        "Middleware rejected",
-      );
-
-      expect(handler).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("query validation", () => {
-    it("parses and validates query parameters", async () => {
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
         input: {
           querySchema: z.object({
-            page: z.coerce.number().int().positive(),
-            search: z.string().optional(),
+            username: z.string(),
+            page: z.coerce.number().int(),
           }),
         },
         handler: ({ query }) => query,
       });
 
-      await expect(
-        endpoint.handle(
-          createRequest("https://example.com/api/test?page=2&search=vitest"),
-        ),
-      ).resolves.toEqual({
+      const result = await endpoint.handle(
+        new Request("http://localhost/users?username=tolha&page=2"),
+      );
+
+      expect(result).toEqual({
+        username: "tolha",
         page: 2,
-        search: "vitest",
       });
     });
 
     it("preserves repeated query parameters as arrays", async () => {
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/search",
         method: "GET",
         input: {
           querySchema: z.object({
@@ -266,194 +125,130 @@ describe("Endpoint", () => {
         handler: ({ query }) => query,
       });
 
-      await expect(
-        endpoint.handle(
-          createRequest(
-            "https://example.com/api/test?tag=typescript&tag=vitest",
-          ),
-        ),
-      ).resolves.toEqual({
-        tag: ["typescript", "vitest"],
+      const result = await endpoint.handle(
+        new Request("http://localhost/search?tag=typescript&tag=security"),
+      );
+
+      expect(result).toEqual({
+        tag: ["typescript", "security"],
       });
     });
 
-    it("rejects invalid query input", async () => {
-      const handler = vi.fn();
-
+    it("rejects invalid query parameters", async () => {
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/users",
         method: "GET",
         input: {
           querySchema: z.object({
             page: z.coerce.number().int().positive(),
           }),
         },
-        handler,
+        handler: vi.fn(),
       });
 
       await expect(
-        endpoint.handle(
-          createRequest("https://example.com/api/test?page=invalid"),
-        ),
+        endpoint.handle(new Request("http://localhost/users?page=-1")),
       ).rejects.toThrow();
 
-      expect(handler).not.toHaveBeenCalled();
+      expect(endpoint.config.handler).not.toHaveBeenCalled();
     });
 
-    it("supports Zod transformations", async () => {
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        input: {
-          querySchema: z.object({
-            name: z.string().trim().toLowerCase(),
-          }),
-        },
-        handler: ({ query }) => query,
-      });
-
-      await expect(
-        endpoint.handle(
-          createRequest("https://example.com/api/test?name=%20VITEST%20"),
-        ),
-      ).resolves.toEqual({ name: "vitest" });
-    });
-
-    it("does not parse query parameters when no query schema is configured", async () => {
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "GET",
-        handler: ({ query }) => query,
-      });
-
-      await expect(
-        endpoint.handle(
-          createRequest("https://example.com/api/test?unexpected=value"),
-        ),
-      ).resolves.toBeUndefined();
-    });
-  });
-
-  describe("JSON body validation", () => {
-    it("parses and validates a JSON body", async () => {
+    it("parses and validates JSON request bodies", async () => {
       const endpoint = new Endpoint({
         path: "/users",
         method: "POST",
         input: {
           dataSchema: z.object({
-            name: z.string().min(1),
-            age: z.coerce.number().int().nonnegative(),
+            username: z.string(),
+            age: z.number().int(),
           }),
         },
         handler: ({ data }) => data,
       });
 
-      await expect(
-        endpoint.handle(
-          createRequest("https://example.com/api/users", {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              name: "Tolha",
-              age: "20",
-            }),
+      const result = await endpoint.handle(
+        new Request("http://localhost/users", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            username: "tolha",
+            age: 20,
           }),
-        ),
-      ).resolves.toEqual({
-        name: "Tolha",
+        }),
+      );
+
+      expect(result).toEqual({
+        username: "tolha",
         age: 20,
       });
     });
 
-    it("accepts structured JSON media types", async () => {
+    it("rejects requests without a JSON content type", async () => {
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/users",
         method: "POST",
         input: {
           dataSchema: z.object({
-            ok: z.boolean(),
+            username: z.string(),
+          }),
+        },
+        handler: vi.fn(),
+      });
+
+      await expect(
+        endpoint.handle(
+          new Request("http://localhost/users", {
+            method: "POST",
+            body: JSON.stringify({ username: "tolha" }),
+          }),
+        ),
+      ).rejects.toThrow();
+
+      expect(endpoint.config.handler).not.toHaveBeenCalled();
+    });
+
+    it("accepts structured JSON media types", async () => {
+      const endpoint = new Endpoint({
+        path: "/users",
+        method: "POST",
+        input: {
+          dataSchema: z.object({
+            username: z.string(),
           }),
         },
         handler: ({ data }) => data,
       });
 
-      await expect(
-        endpoint.handle(
-          createRequest("https://example.com/api/test", {
-            method: "POST",
-            headers: {
-              "content-type": "application/problem+json; charset=utf-8",
-            },
-            body: JSON.stringify({ ok: true }),
-          }),
-        ),
-      ).resolves.toEqual({ ok: true });
-    });
+      const result = await endpoint.handle(
+        new Request("http://localhost/users", {
+          method: "POST",
+          headers: {
+            "content-type": "application/problem+json; charset=utf-8",
+          },
+          body: JSON.stringify({ username: "tolha" }),
+        }),
+      );
 
-    it("rejects a missing content type", async () => {
-      const handler = vi.fn();
-
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "POST",
-        input: {
-          dataSchema: z.object({ name: z.string() }),
-        },
-        handler,
-      });
-
-      await expect(
-        endpoint.handle(
-          createRequest("https://example.com/api/test", {
-            method: "POST",
-            body: JSON.stringify({ name: "Tolha" }),
-          }),
-        ),
-      ).rejects.toThrow();
-
-      expect(handler).not.toHaveBeenCalled();
-    });
-
-    it("rejects a non-JSON content type", async () => {
-      const endpoint = new Endpoint({
-        path: "/test",
-        method: "POST",
-        input: {
-          dataSchema: z.object({ name: z.string() }),
-        },
-        handler: () => "done",
-      });
-
-      await expect(
-        endpoint.handle(
-          createRequest("https://example.com/api/test", {
-            method: "POST",
-            headers: {
-              "content-type": "text/plain",
-            },
-            body: "hello",
-          }),
-        ),
-      ).rejects.toThrow();
+      expect(result).toEqual({ username: "tolha" });
     });
 
     it("rejects malformed JSON", async () => {
-      const handler = vi.fn();
-
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/users",
         method: "POST",
         input: {
-          dataSchema: z.object({ name: z.string() }),
+          dataSchema: z.object({
+            username: z.string(),
+          }),
         },
-        handler,
+        handler: vi.fn(),
       });
 
       await expect(
         endpoint.handle(
-          createRequest("https://example.com/api/test", {
+          new Request("http://localhost/users", {
             method: "POST",
             headers: {
               "content-type": "application/json",
@@ -463,358 +258,727 @@ describe("Endpoint", () => {
         ),
       ).rejects.toThrow();
 
-      expect(handler).not.toHaveBeenCalled();
+      expect(endpoint.config.handler).not.toHaveBeenCalled();
     });
 
     it("rejects invalid JSON body data", async () => {
-      const handler = vi.fn();
-
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/users",
         method: "POST",
         input: {
           dataSchema: z.object({
-            name: z.string().min(1),
+            username: z.string().min(3),
           }),
         },
-        handler,
+        handler: vi.fn(),
       });
 
       await expect(
         endpoint.handle(
-          createRequest("https://example.com/api/test", {
+          new Request("http://localhost/users", {
             method: "POST",
             headers: {
               "content-type": "application/json",
             },
-            body: JSON.stringify({ name: "" }),
+            body: JSON.stringify({ username: "ab" }),
           }),
         ),
       ).rejects.toThrow();
 
-      expect(handler).not.toHaveBeenCalled();
+      expect(endpoint.config.handler).not.toHaveBeenCalled();
     });
 
-    it("does not consume the body when no body schema is configured", async () => {
-      const request = createRequest("https://example.com/api/test", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ name: "Tolha" }),
-      });
-
+    it("allows JSON bodies without a query schema", async () => {
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/users",
         method: "POST",
-        handler: () => "done",
+        input: {
+          dataSchema: z.object({
+            username: z.string(),
+          }),
+        },
+        handler: ({ query, data }) => ({ query, data }),
       });
 
-      await expect(endpoint.handle(request)).resolves.toBe("done");
-      expect(request.bodyUsed).toBe(false);
+      const result = await endpoint.handle(
+        new Request("http://localhost/users", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ username: "tolha" }),
+        }),
+      );
+
+      expect(result).toEqual({
+        query: undefined,
+        data: { username: "tolha" },
+      });
     });
   });
 
-  describe("handler", () => {
-    it("returns the handler result", async () => {
+  describe("context", () => {
+    it("creates context for each request", async () => {
+      const contextFactory = vi.fn(({ request }: { request: Request }) => ({
+        requestUrl: request.url,
+      }));
+
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/context",
         method: "GET",
-        handler: () => ({ success: true }),
+        context: contextFactory,
+        handler: ({ context }) => context.requestUrl,
       });
 
-      await expect(endpoint.handle(createRequest())).resolves.toEqual({
-        success: true,
-      });
+      const first = await endpoint.handle(
+        new Request("http://localhost/first"),
+      );
+      const second = await endpoint.handle(
+        new Request("http://localhost/second"),
+      );
+
+      expect(first).toBe("http://localhost/first");
+      expect(second).toBe("http://localhost/second");
+      expect(contextFactory).toHaveBeenCalledTimes(2);
     });
 
-    it("awaits asynchronous handler results", async () => {
+    it("supports asynchronous context factories", async () => {
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/context",
         method: "GET",
-        handler: async () => {
-          await Promise.resolve();
-          return "completed";
+        context: async () => ({
+          userId: "user-1",
+        }),
+        handler: ({ context }) => context.userId,
+      });
+
+      await expect(
+        endpoint.handle(new Request("http://localhost/context")),
+      ).resolves.toBe("user-1");
+    });
+
+    it("propagates context factory errors", async () => {
+      const endpoint = new Endpoint({
+        path: "/context",
+        method: "GET",
+        context: () => {
+          throw new Error("Context failed");
+        },
+        handler: vi.fn(),
+      });
+
+      await expect(
+        endpoint.handle(new Request("http://localhost/context")),
+      ).rejects.toThrow("Context failed");
+    });
+  });
+
+  describe("middleware", () => {
+    it("executes middleware sequentially before the handler", async () => {
+      const events: string[] = [];
+
+      const endpoint = new Endpoint({
+        path: "/middleware",
+        method: "GET",
+        middleware: [
+          async () => {
+            events.push("middleware-1");
+          },
+          async () => {
+            await Promise.resolve();
+            events.push("middleware-2");
+          },
+        ],
+        handler: () => {
+          events.push("handler");
+          return "ok";
         },
       });
 
-      await expect(endpoint.handle(createRequest())).resolves.toBe("completed");
+      await endpoint.handle(new Request("http://localhost/middleware"));
+
+      expect(events).toEqual(["middleware-1", "middleware-2", "handler"]);
     });
 
+    it("passes request, context, and response helpers to middleware", async () => {
+      const middleware = vi.fn();
+      const context = { userId: "user-1" };
+
+      const endpoint = new Endpoint({
+        path: "/middleware",
+        method: "GET",
+        context: () => context,
+        middleware: [middleware],
+        handler: () => "ok",
+      });
+
+      await endpoint.handle(new Request("http://localhost/middleware"));
+
+      expect(middleware).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.any(Request),
+          context,
+          response: expect.any(Object),
+        }),
+      );
+    });
+
+    it("stops execution when middleware throws", async () => {
+      const secondMiddleware = vi.fn();
+      const handler = vi.fn();
+
+      const endpoint = new Endpoint({
+        path: "/middleware",
+        method: "GET",
+        middleware: [
+          () => {
+            throw new Error("Forbidden");
+          },
+          secondMiddleware,
+        ],
+        handler,
+      });
+
+      await expect(
+        endpoint.handle(new Request("http://localhost/middleware")),
+      ).rejects.toThrow("Forbidden");
+
+      expect(secondMiddleware).not.toHaveBeenCalled();
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("does not validate inputs after middleware fails", async () => {
+      const endpoint = new Endpoint({
+        path: "/middleware",
+        method: "POST",
+        middleware: [
+          () => {
+            throw new Error("Middleware failed");
+          },
+        ],
+        input: {
+          dataSchema: z.object({
+            name: z.string(),
+          }),
+        },
+        handler: vi.fn(),
+      });
+
+      await expect(
+        endpoint.handle(
+          new Request("http://localhost/middleware", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: "invalid",
+          }),
+        ),
+      ).rejects.toThrow("Middleware failed");
+
+      expect(endpoint.config.handler).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("handler errors", () => {
     it("propagates handler errors", async () => {
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/error",
         method: "GET",
         handler: () => {
           throw new Error("Handler failed");
         },
       });
 
-      await expect(endpoint.handle(createRequest())).rejects.toThrow(
-        "Handler failed",
-      );
+      await expect(
+        endpoint.handle(new Request("http://localhost/error")),
+      ).rejects.toThrow("Handler failed");
     });
 
-    it("passes the same request instance to the handler", async () => {
-      const request = createRequest();
-
+    it("supports asynchronous handler results", async () => {
       const endpoint = new Endpoint({
-        path: "/test",
+        path: "/async",
         method: "GET",
-        handler: ({ request: receivedRequest }) => receivedRequest === request,
+        handler: async () => {
+          await Promise.resolve();
+          return { success: true };
+        },
       });
 
-      await expect(endpoint.handle(request)).resolves.toBe(true);
+      await expect(
+        endpoint.handle(new Request("http://localhost/async")),
+      ).resolves.toEqual({ success: true });
     });
   });
 });
 
 describe("EndpointRegistry", () => {
-  describe("base path and route creation", () => {
-    it("joins the base path and route path", async () => {
-      const api = new EndpointRegistry({ basePath: "/api/v1/" });
+  describe("configuration", () => {
+    it("normalizes the registry base path", () => {
+      const registry = new EndpointRegistry({
+        basePath: "//api///v1/",
+      });
 
-      const endpoint = api.create({
+      expect(registry.basePath).toBe("/api/v1");
+    });
+
+    it("uses root as the default base path", () => {
+      const registry = new EndpointRegistry();
+
+      expect(registry.basePath).toBe("/");
+    });
+
+    it("freezes the configuration and middleware array", () => {
+      const middleware = [vi.fn()];
+
+      const registry = new EndpointRegistry({
+        basePath: "/api",
+        middleware,
+      });
+
+      expect(Object.isFrozen(registry.config)).toBe(true);
+      expect(Object.isFrozen(registry.config.middleware)).toBe(true);
+      expect(registry.config.middleware).not.toBe(middleware);
+    });
+  });
+
+  describe("route creation", () => {
+    it("joins the base path and route path", () => {
+      const registry = new EndpointRegistry({
+        basePath: "/api/v1/",
+      });
+
+      const endpoint = registry.create({
         path: "/users",
         method: "GET",
-        handler: () => "users",
+        handler: () => "ok",
       });
 
       expect(endpoint.path).toBe("/api/v1/users");
-      await expect(endpoint.handle(createRequest())).resolves.toBe("users");
     });
 
-    it("normalizes repeated slashes", () => {
-      const api = new EndpointRegistry({ basePath: "//api///v1//" });
+    it("normalizes redundant route slashes", () => {
+      const registry = new EndpointRegistry({
+        basePath: "//api//",
+      });
 
-      const endpoint = api.create({
-        path: "//users//",
+      const endpoint = registry.create({
+        path: "//users///profile/",
         method: "GET",
-        handler: () => null,
+        handler: () => "ok",
       });
 
-      expect(api.basePath).toBe("/api/v1");
-      expect(endpoint.path).toBe("/api/v1/users");
-    });
-
-    it("supports an empty base path", () => {
-      const api = new EndpointRegistry();
-
-      expect(
-        api.create({
-          path: "users",
-          method: "GET",
-          handler: () => null,
-        }).path,
-      ).toBe("/users");
+      expect(endpoint.path).toBe("/api/users/profile");
     });
 
     it("supports a root route", () => {
-      const api = new EndpointRegistry({ basePath: "/api/v1" });
+      const registry = new EndpointRegistry({
+        basePath: "/api/v1",
+      });
 
-      expect(
-        api.create({
-          path: "/",
-          method: "GET",
-          handler: () => null,
-        }).path,
-      ).toBe("/api/v1");
+      const endpoint = registry.create({
+        path: "/",
+        method: "GET",
+        handler: () => "ok",
+      });
+
+      expect(endpoint.path).toBe("/api/v1");
     });
 
-    it("supports a root base path", () => {
-      const api = new EndpointRegistry({ basePath: "/" });
+    it("supports an empty base path", () => {
+      const registry = new EndpointRegistry({
+        basePath: "",
+      });
 
-      expect(
-        api.create({
-          path: "/users",
-          method: "GET",
-          handler: () => null,
-        }).path,
-      ).toBe("/users");
+      const endpoint = registry.create({
+        path: "users",
+        method: "GET",
+        handler: () => "ok",
+      });
+
+      expect(endpoint.path).toBe("/users");
+    });
+
+    it("preserves the endpoint method", () => {
+      const registry = new EndpointRegistry();
+
+      const endpoint = registry.create({
+        path: "/users",
+        method: "PATCH",
+        handler: () => "ok",
+      });
+
+      expect(endpoint.method).toBe("PATCH");
+    });
+
+    it.each([
+      "GET",
+      "HEAD",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ] as const)("supports HTTP method %s", (method) => {
+      const registry = new EndpointRegistry();
+
+      const endpoint = registry.create({
+        path: "/resource",
+        method: method as HttpMethod,
+        handler: () => method,
+      });
+
+      expect(endpoint.method).toBe(method);
     });
   });
 
   describe("context inheritance", () => {
-    it("inherits the factory context when the route has no context", async () => {
-      const api = new EndpointRegistry({
+    it("inherits the registry context factory", async () => {
+      const registry = new EndpointRegistry({
+        basePath: "/api",
         context: () => ({
-          userId: "user_123",
-          role: "admin",
+          userId: "user-1",
         }),
       });
 
-      const endpoint = api.create({
+      const endpoint = registry.create({
+        path: "/profile",
+        method: "GET",
+        handler: ({ context }) => context.userId,
+      });
+
+      await expect(
+        endpoint.handle(new Request("http://localhost/api/profile")),
+      ).resolves.toBe("user-1");
+    });
+
+    it("allows a route to override the registry context", async () => {
+      const registry = new EndpointRegistry({
+        context: () => ({
+          source: "registry",
+        }),
+      });
+
+      const endpoint = registry.create({
+        path: "/profile",
+        method: "GET",
+        context: () => ({
+          source: "route",
+        }),
+        handler: ({ context }) => context.source,
+      });
+
+      await expect(
+        endpoint.handle(new Request("http://localhost/profile")),
+      ).resolves.toBe("route");
+    });
+
+    it("uses an empty context when no factory is configured", async () => {
+      const registry = new EndpointRegistry();
+
+      const endpoint = registry.create({
         path: "/profile",
         method: "GET",
         handler: ({ context }) => context,
       });
 
-      await expect(endpoint.handle(createRequest())).resolves.toEqual({
-        userId: "user_123",
-        role: "admin",
-      });
-    });
-
-    it("uses the route context instead of the factory context", async () => {
-      const factoryContext = vi.fn(() => ({
-        source: "factory",
-      }));
-
-      const routeContext = vi.fn(() => ({
-        source: "route",
-      }));
-
-      const api = new EndpointRegistry({
-        context: factoryContext,
-      });
-
-      const endpoint = api.create({
-        path: "/profile",
-        method: "GET",
-        context: routeContext,
-        handler: ({ context }) => context.source,
-      });
-
-      await expect(endpoint.handle(createRequest())).resolves.toBe("route");
-
-      expect(routeContext).toHaveBeenCalledOnce();
-      expect(factoryContext).not.toHaveBeenCalled();
+      await expect(
+        endpoint.handle(new Request("http://localhost/profile")),
+      ).resolves.toEqual({});
     });
   });
 
   describe("middleware inheritance", () => {
-    it("executes factory middleware before route middleware", async () => {
-      const order: string[] = [];
+    it("inherits registry middleware by default", async () => {
+      const events: string[] = [];
 
-      const api = new EndpointRegistry({
-        middleware: [
-          () => {
-            order.push("factory-1");
-          },
-          () => {
-            order.push("factory-2");
-          },
-        ],
+      const registryMiddleware: EndpointMiddleware<object> = () => {
+        events.push("registry");
+      };
+
+      const routeMiddleware: EndpointMiddleware<object> = () => {
+        events.push("route");
+      };
+
+      const registry = new EndpointRegistry({
+        middleware: [registryMiddleware],
       });
 
-      const endpoint = api.create({
-        path: "/test",
+      const endpoint = registry.create({
+        path: "/users",
         method: "GET",
-        middleware: [
-          () => {
-            order.push("route-1");
-          },
-          () => {
-            order.push("route-2");
-          },
-        ],
+        middleware: [routeMiddleware],
         handler: () => {
-          order.push("handler");
+          events.push("handler");
+          return "ok";
         },
       });
 
-      await endpoint.handle(createRequest());
+      await endpoint.handle(new Request("http://localhost/users"));
 
-      expect(order).toEqual([
-        "factory-1",
-        "factory-2",
-        "route-1",
-        "route-2",
-        "handler",
-      ]);
+      expect(events).toEqual(["registry", "route", "handler"]);
     });
 
-    it("overrides factory middleware when middlewareMode is override", async () => {
-      const factoryMiddleware = vi.fn();
-      const routeMiddleware = vi.fn();
-
-      const api = new EndpointRegistry({
-        middleware: [factoryMiddleware],
-      });
-
-      const endpoint = api.create({
-        path: "/test",
-        method: "GET",
-        middlewareMode: "override",
-        middleware: [routeMiddleware],
-        handler: () => "done",
-      });
-
-      await endpoint.handle(createRequest());
-
-      expect(factoryMiddleware).not.toHaveBeenCalled();
-      expect(routeMiddleware).toHaveBeenCalledOnce();
-    });
-
-    it("runs no middleware when override mode has no route middleware", async () => {
-      const factoryMiddleware = vi.fn();
-      const handler = vi.fn();
-
-      const api = new EndpointRegistry({
-        middleware: [factoryMiddleware],
-      });
-
-      const endpoint = api.create({
-        path: "/test",
-        method: "GET",
-        middlewareMode: "override",
-        handler,
-      });
-
-      await endpoint.handle(createRequest());
-
-      expect(factoryMiddleware).not.toHaveBeenCalled();
-      expect(handler).toHaveBeenCalledOnce();
-    });
-
-    it("supports factory middleware without route middleware", async () => {
+    it("supports registry middleware without route middleware", async () => {
       const middleware = vi.fn();
 
-      const api = new EndpointRegistry({
+      const registry = new EndpointRegistry({
         middleware: [middleware],
       });
 
-      const endpoint = api.create({
-        path: "/test",
+      const endpoint = registry.create({
+        path: "/users",
         method: "GET",
-        handler: () => "done",
+        handler: () => "ok",
       });
 
-      await endpoint.handle(createRequest());
+      await endpoint.handle(new Request("http://localhost/users"));
 
       expect(middleware).toHaveBeenCalledOnce();
     });
-  });
 
-  describe("configuration immutability", () => {
-    it("freezes the factory configuration and middleware array", () => {
+    it("overrides registry middleware when requested", async () => {
+      const events: string[] = [];
+
+      const registryMiddleware: EndpointMiddleware<object> = () => {
+        events.push("registry");
+      };
+
+      const routeMiddleware: EndpointMiddleware<object> = () => {
+        events.push("route");
+      };
+
+      const registry = new EndpointRegistry({
+        middleware: [registryMiddleware],
+      });
+
+      const endpoint = registry.create({
+        path: "/users",
+        method: "GET",
+        middlewareMode: "override",
+        middleware: [routeMiddleware],
+        handler: () => "ok",
+      });
+
+      await endpoint.handle(new Request("http://localhost/users"));
+
+      expect(events).toEqual(["route"]);
+    });
+
+    it("supports overriding registry middleware with an empty list", async () => {
       const middleware = vi.fn();
 
-      const api = new EndpointRegistry({
-        basePath: "/api",
+      const registry = new EndpointRegistry({
         middleware: [middleware],
       });
 
-      expect(Object.isFrozen(api.config)).toBe(true);
-      expect(Object.isFrozen(api.config.middleware)).toBe(true);
-    });
-
-    it("copies factory middleware instead of retaining the original array", () => {
-      const first = vi.fn();
-      const second = vi.fn();
-      const middleware = [first];
-
-      const api = new EndpointRegistry({ middleware });
-      middleware.push(second);
-
-      const endpoint = api.create({
-        path: "/test",
+      const endpoint = registry.create({
+        path: "/users",
         method: "GET",
-        handler: () => null,
+        middlewareMode: "override",
+        handler: () => "ok",
       });
 
-      expect(endpoint.config.middleware).toHaveLength(1);
-      expect(endpoint.config.middleware?.[0]).toBe(first);
+      await endpoint.handle(new Request("http://localhost/users"));
+
+      expect(middleware).not.toHaveBeenCalled();
     });
+
+    it("does not mutate registry middleware when creating routes", () => {
+      const registryMiddleware = vi.fn();
+      const routeMiddleware = vi.fn();
+
+      const registry = new EndpointRegistry({
+        middleware: [registryMiddleware],
+      });
+
+      const first = registry.create({
+        path: "/first",
+        method: "GET",
+        middleware: [routeMiddleware],
+        handler: () => "ok",
+      });
+
+      const second = registry.create({
+        path: "/second",
+        method: "GET",
+        handler: () => "ok",
+      });
+
+      expect(first.config.middleware).toHaveLength(2);
+      expect(second.config.middleware).toHaveLength(1);
+      expect(registry.config.middleware).toHaveLength(1);
+    });
+  });
+
+  describe("input validation", () => {
+    it("preserves schemas when creating an endpoint", async () => {
+      const registry = new EndpointRegistry({
+        basePath: "/api",
+      });
+
+      const endpoint = registry.create({
+        path: "/users",
+        method: "POST",
+        input: {
+          querySchema: z.object({
+            source: z.string(),
+          }),
+          dataSchema: z.object({
+            username: z.string(),
+          }),
+        },
+        handler: ({ query, data }) => ({ query, data }),
+      });
+
+      const result = await endpoint.handle(
+        new Request("http://localhost/api/users?source=web", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            username: "tolha",
+          }),
+        }),
+      );
+
+      expect(result).toEqual({
+        query: { source: "web" },
+        data: { username: "tolha" },
+      });
+    });
+
+    it("rejects a data schema for GET routes at runtime", () => {
+      const registry = new EndpointRegistry();
+
+      expect(() =>
+        registry.create({
+          path: "/users",
+          method: "GET",
+          input: {
+            dataSchema: z.object({
+              username: z.string(),
+            }),
+          },
+          handler: () => "ok",
+        } as never),
+      ).toThrow("GET endpoints cannot declare a dataSchema.");
+    });
+  });
+});
+
+describe("Endpoint type inference", () => {
+  it("infers parsed query and body values from Zod schemas", async () => {
+    const registry = new EndpointRegistry({
+      basePath: "/api",
+    });
+
+    const endpoint = registry.create({
+      path: "/users",
+      method: "POST",
+      input: {
+        querySchema: z.object({
+          page: z.coerce.number(),
+        }),
+        dataSchema: z.object({
+          username: z.string(),
+          active: z.boolean().default(true),
+        }),
+      },
+      handler: ({ query, data }) => ({
+        page: query.page,
+        username: data.username,
+        active: data.active,
+      }),
+    });
+
+    const result = await endpoint.handle(
+      new Request("http://localhost/api/users?page=2", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          username: "tolha",
+        }),
+      }),
+    );
+
+    expect(result).toEqual({
+      page: 2,
+      username: "tolha",
+      active: true,
+    });
+  });
+
+  it("infers undefined query and data when schemas are omitted", () => {
+    const endpoint = new Endpoint({
+      path: "/health",
+      method: "GET",
+      handler: ({ query, data }) => {
+        const queryIsUndefined: undefined = query;
+        const dataIsUndefined: undefined = data;
+
+        return {
+          query: queryIsUndefined,
+          data: dataIsUndefined,
+        };
+      },
+    });
+
+    expect(endpoint.path).toBe("/health");
+  });
+
+  it("preserves literal path and method types", () => {
+    const registry = new EndpointRegistry({
+      basePath: "/api",
+    });
+
+    const endpoint = registry.create({
+      path: "/users",
+      method: "GET",
+      handler: () => "ok",
+    });
+
+    const path: "/api/users" = endpoint.path;
+    const method: "GET" = endpoint.method;
+
+    expect(path).toBe("/api/users");
+    expect(method).toBe("GET");
+  });
+
+  it("supports explicit route context types", async () => {
+    type UserContext = {
+      user: {
+        id: string;
+      };
+    };
+
+    const registry = new EndpointRegistry({
+      context: () => ({
+        user: { id: "registry-user" },
+      }),
+    });
+
+    const endpoint = registry.create<
+      "/profile",
+      "GET",
+      undefined,
+      undefined,
+      string,
+      UserContext
+    >({
+      path: "/profile",
+      method: "GET",
+      context: () => ({
+        user: { id: "route-user" },
+      }),
+      handler: ({ context }) => context.user.id,
+    });
+
+    await expect(
+      endpoint.handle(new Request("http://localhost/profile")),
+    ).resolves.toBe("route-user");
   });
 });

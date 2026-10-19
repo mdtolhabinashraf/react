@@ -8,6 +8,7 @@ Complete API reference for `@tolha/react`, covering the package's utility functi
 - [Imports](#imports)
 - [UUID](#uuid)
 - [Endpoint Utilities](#endpoint-utilities)
+- [Endpoint Client](#endpoint-client)
 - [IP Address Utilities](#ip-address-utilities)
 - [HTTP Header Utilities](#http-header-utilities)
 - [User-Agent Detection](#user-agent-detection)
@@ -59,6 +60,7 @@ import {
   MemoryRateLimitStore,
   Endpoint,
   EndpointRegistry,
+  EndpointClient,
 } from "@tolha/react/server";
 
 import type {
@@ -252,6 +254,10 @@ content type (`application/json` or a structured `+json` type). Validation
 failures throw configured endpoint errors with `400` status. Errors from
 context, middleware, or the handler are propagated unchanged.
 
+`GET` and `HEAD` endpoints cannot declare `input.dataSchema`. This restriction
+is enforced both by the TypeScript configuration type and at runtime for
+JavaScript callers or code that bypasses type checking.
+
 #### Handler and middleware arguments
 
 Both handlers and middleware receive `request`, `context`, and `response`.
@@ -272,10 +278,42 @@ The response helper methods are:
 | Method | Description |
 | --- | --- |
 | `response.json(body, init?)` | Creates a JSON response and sets `application/json; charset=utf-8` when absent. |
-| `response.text(body, init?)` | Creates a plain-text response. |
-| `response.html(body, init?)` | Creates an HTML response. |
+| `response.text(body, init?)` | Creates a plain-text response and sets `text/plain; charset=utf-8` when absent. |
+| `response.html(body, init?)` | Creates an HTML response and sets `text/html; charset=utf-8` when absent. |
 | `response.redirect(url, status?)` | Creates a redirect; the default status is `302`. |
 | `response.raw(response)` | Returns an existing native `Response` unchanged. |
+
+The JSON, text, and HTML helpers preserve the response body type for TypeScript
+inference. This allows an endpoint's declared result type to flow into
+`Endpoint` metadata and into the endpoint client.
+
+#### Endpoint inference metadata
+
+Each endpoint exposes a type-only `$infer` property for sharing its route
+contract with other type-safe tools:
+
+```ts
+const createUser = new Endpoint({
+  path: "/users",
+  method: "POST",
+  input: {
+    dataSchema: z.object({
+      name: z.string(),
+    }),
+  },
+  handler: ({ data, response }) =>
+    response.json({
+      id: "user-123",
+      name: data.name,
+    }),
+});
+
+type CreateUser = typeof createUser.$infer;
+```
+
+`$infer` contains the normalized `path`, HTTP `method`, parsed `query` and
+`data` types, and the response body type inferred from the handler result. It
+exists for type checking only and is not a runtime property.
 
 ### `EndpointRegistry`
 
@@ -328,6 +366,118 @@ Use `Endpoint` and `EndpointRegistry` with a server adapter that performs
 route matching and calls `handle()`. The endpoint utility does not enforce
 request body size limits, authenticate requests, or send an error response
 automatically.
+
+---
+
+## Endpoint Client
+
+`EndpointClient` is a type-safe client for calling endpoint contracts from
+another part of an application. It is exported from `@tolha/react/server` and
+uses Apexa for HTTP requests.
+
+The client accepts a tuple of endpoint metadata types. In practice, these can
+come from `Endpoint` instances through their type-only `$infer` property:
+
+```ts
+import { Endpoint, EndpointClient } from "@tolha/react/server";
+import { z } from "zod";
+
+const createUser = new Endpoint({
+  path: "/users",
+  method: "POST",
+  input: {
+    dataSchema: z.object({
+      name: z.string(),
+    }),
+  },
+  handler: ({ data, response }) =>
+    response.json({
+      id: "user-123",
+      name: data.name,
+    }),
+});
+
+const getUser = new Endpoint({
+  path: "/users/[userId]",
+  method: "GET",
+  input: {
+    querySchema: z.object({
+      includePosts: z.coerce.boolean().optional(),
+    }),
+  },
+  handler: ({ query, response }) =>
+    response.json({
+      id: "user-123",
+      includePosts: query?.includePosts ?? false,
+    }),
+});
+
+type CreateUser = typeof createUser.$infer;
+type GetUser = typeof getUser.$infer;
+
+const client = new EndpointClient<[CreateUser, GetUser]>({
+  baseUrl: "https://api.example.com",
+});
+
+const created = await client.users.post({
+  data: { name: "Ada" },
+});
+
+const existing = await client.users["user-123"].get({
+  query: { includePosts: true },
+});
+```
+
+### `EndpointClient(options?)`
+
+Creates a lazy, type-safe route proxy backed by Apexa. The returned value is
+used directly as the route tree:
+
+| Option | Type | Required | Description |
+| --- | --- | --- | --- |
+| `options` | `ClientOptions` | No | Apexa client configuration, including `baseUrl` and other request defaults. |
+
+The returned route proxy supports direct chained access:
+
+```ts
+await client.users.post({ data: { name: "Ada" } });
+await client.users["user-123"].get();
+```
+
+The implementation also provides `client.api` as an equivalent nested route
+tree and `client.client` for access to the underlying Apexa instance. These
+are auxiliary properties; endpoint calls are made through the direct route
+chain shown above.
+
+### Route mapping
+
+- Path segments become nested properties.
+- Kebab-case segments become camelCase properties (`sign-up` becomes
+  `signUp`).
+- Dynamic segments written as `[param]` become string-indexed properties.
+- HTTP methods are lowercase properties such as `get`, `post`, `patch`, and
+  `delete`.
+- Multiple methods on the same path are preserved independently.
+- Paths are normalized before requests are sent; duplicate and trailing
+  slashes are removed.
+
+Dynamic route parameters are represented by property access. The client does
+not interpolate named placeholders from an options object.
+
+### Request options and responses
+
+Read methods (`get`, `delete`, `head`, and `options`) accept optional request
+options. Mutation methods (`post`, `put`, and `patch`) accept request options
+with `data` for the request body. Query parameters are passed through `query`.
+Additional Apexa request options, such as headers, can be supplied unchanged.
+
+`data` is translated to Apexa's request body argument and is not forwarded as
+an extra request option. Each method returns `Promise<ApiResponse<TResult>>`,
+where `TResult` is the response body type inferred from the endpoint contract.
+
+The client currently supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`,
+and `OPTIONS`. Route matching, authentication, retries, and response error
+handling remain responsibilities of the underlying HTTP client and application.
 
 ---
 

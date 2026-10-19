@@ -1,7 +1,7 @@
 /**
  * Compile-time marker that associates a response with its body type.
  */
-declare const responseBodyType: unique symbol;
+export declare const responseBodyType: unique symbol;
 
 /**
  * Native HTTP response carrying a compile-time body type.
