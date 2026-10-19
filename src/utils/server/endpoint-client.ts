@@ -14,6 +14,7 @@
  * @packageDocumentation
  */
 
+import { normalizePath } from "./endpoint.js";
 import {
   Apexa,
   type ApiResponse,
@@ -51,18 +52,6 @@ function toKebabCase(value: string): string {
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Normalizes a URL path.
- *
- * Removes duplicate slashes and trailing slashes while preserving
- * the root path.
- */
-function normalizePath(path: string): string {
-  const normalized = path.replace(/\/+/g, "/").replace(/\/+$/, "");
-
-  return normalized || "/";
 }
 
 /* -------------------------------------------------------------------------- */
