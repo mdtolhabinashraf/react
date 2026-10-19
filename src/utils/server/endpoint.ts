@@ -140,17 +140,17 @@ export type EndpointHandlerArgs<
 };
 
 /**
- * An endpoint handler that returns a synchronous or asynchronous result.
+ * An endpoint handler that returns a synchronous or asynchronous Response.
  *
  * @typeParam TQuery - Parsed query input.
  * @typeParam TData - Parsed body input.
- * @typeParam TResult - Handler result.
+ * @typeParam TResult - Handler response.
  * @typeParam TContext - Request-scoped context.
  */
 export type EndpointHandler<
   TQuery = undefined,
   TData = undefined,
-  TResult = unknown,
+  TResult extends Response = Response,
   TContext extends EndpointContext = object,
 > = (
   args: EndpointHandlerArgs<TQuery, TData, TContext>,
@@ -163,7 +163,7 @@ export type EndpointHandler<
  * @typeParam TMethod - HTTP method.
  * @typeParam TQuery - Query schema.
  * @typeParam TData - JSON body schema.
- * @typeParam TResult - Handler result.
+ * @typeParam TResult - Handler response.
  * @typeParam TContext - Request-scoped context.
  */
 export type EndpointConfig<
@@ -171,7 +171,7 @@ export type EndpointConfig<
   TMethod extends HttpMethod = HttpMethod,
   TQuery extends Schema | undefined = undefined,
   TData extends Schema | undefined = undefined,
-  TResult = unknown,
+  TResult extends Response = Response,
   TContext extends EndpointContext = object,
 > = {
   readonly path: TPath;
@@ -217,7 +217,7 @@ export type MiddlewareMode = "extend" | "override";
  * @typeParam TMethod - HTTP method.
  * @typeParam TQuery - Query schema.
  * @typeParam TData - JSON body schema.
- * @typeParam TResult - Handler result.
+ * @typeParam TResult - Handler response.
  * @typeParam TFactoryContext - Registry-provided context.
  * @typeParam TRouteContext - Route context.
  */
@@ -226,7 +226,7 @@ export type EndpointRouteConfig<
   TMethod extends HttpMethod,
   TQuery extends Schema | undefined,
   TData extends Schema | undefined,
-  TResult,
+  TResult extends Response,
   _TFactoryContext extends EndpointContext,
   TRouteContext extends EndpointContext = EndpointContext,
 > = Omit<
@@ -277,7 +277,7 @@ export type JoinPaths<
  * Normalizes a URL pathname by removing empty segments and ensuring
  * that non-root paths begin with exactly one slash.
  */
-function normalizePath(path: string): string {
+export function normalizePath(path: string): string {
   const segments = path.split("/").filter(Boolean);
 
   return segments.length === 0 ? "/" : `/${segments.join("/")}`;
@@ -367,7 +367,7 @@ function hasJsonContentType(request: Request): boolean {
  * @typeParam TMethod - HTTP method.
  * @typeParam TQuery - Query schema.
  * @typeParam TData - JSON body schema.
- * @typeParam TResult - Handler result.
+ * @typeParam TResult - Handler response.
  * @typeParam TContext - Request-scoped context.
  */
 export class Endpoint<
@@ -375,7 +375,7 @@ export class Endpoint<
   TMethod extends HttpMethod = HttpMethod,
   TQuery extends Schema | undefined = undefined,
   TData extends Schema | undefined = undefined,
-  TResult = unknown,
+  TResult extends Response = Response,
   TContext extends EndpointContext = object,
 > {
   /**
@@ -468,77 +468,81 @@ export class Endpoint<
    * consuming untrusted request bodies.
    *
    * @param request - Fetch API request.
-   * @returns The resolved handler result.
+   * @returns The resolved handler response.
    */
-  public async handle(request: Request): Promise<Awaited<TResult>> {
-    const response = createResponseHelpers();
+  public async handle(request: Request): Promise<Response> {
+    try {
+      const response = createResponseHelpers();
 
-    const context = this.config.context
-      ? await this.config.context({ request })
-      : ({} as TContext);
+      const context = this.config.context
+        ? await this.config.context({ request })
+        : ({} as TContext);
 
-    for (const middlewareFn of this.config.middleware ?? []) {
-      await middlewareFn({
+      for (const middlewareFn of this.config.middleware ?? []) {
+        await middlewareFn({
+          request,
+          context,
+          response,
+        });
+      }
+
+      let query: unknown = undefined;
+      let data: unknown = undefined;
+
+      const { querySchema, dataSchema } = this.config.input ?? {};
+
+      if (querySchema !== undefined) {
+        const url = new URL(request.url);
+        const rawQuery = parseQueryParams(url.searchParams);
+        const result = querySchema.safeParse(rawQuery);
+
+        if (!result.success) {
+          throw new EndpointError("INVALID_REQUEST");
+        }
+
+        query = result.data;
+      }
+
+      // Body parsing is driven exclusively by the configured body schema.
+      // GET and HEAD configurations cannot declare one.
+      if (dataSchema !== undefined) {
+        if (!hasJsonContentType(request)) {
+          throw new EndpointError("BAD_REQUEST");
+        }
+
+        let rawData: unknown;
+
+        try {
+          rawData = await request.json();
+        } catch {
+          throw new EndpointError("BAD_REQUEST");
+        }
+
+        const result = dataSchema.safeParse(rawData);
+
+        if (!result.success) {
+          throw new EndpointError("INVALID_REQUEST");
+        }
+
+        data = result.data;
+      }
+
+      const args: EndpointHandlerArgs<
+        InferSchema<TQuery>,
+        InferSchema<TData>,
+        TContext
+      > = {
         request,
+        query: query as InferSchema<TQuery>,
+        data: data as InferSchema<TData>,
         context,
         response,
-      });
+      };
+
+      return await this.config.handler(args);
+    } catch (error) {
+      return EndpointError.response(error);
     }
-
-    let query: unknown = undefined;
-    let data: unknown = undefined;
-
-    const { querySchema, dataSchema } = this.config.input ?? {};
-
-    if (querySchema !== undefined) {
-      const url = new URL(request.url);
-      const rawQuery = parseQueryParams(url.searchParams);
-      const result = querySchema.safeParse(rawQuery);
-
-      if (!result.success) {
-        throw new EndpointError("INVALID_REQUEST");
-      }
-
-      query = result.data;
-    }
-
-    // Body parsing is driven exclusively by the configured body schema.
-    // GET and HEAD configurations cannot declare one.
-    if (dataSchema !== undefined) {
-      if (!hasJsonContentType(request)) {
-        throw new EndpointError("BAD_REQUEST");
-      }
-
-      let rawData: unknown;
-
-      try {
-        rawData = await request.json();
-      } catch {
-        throw new EndpointError("BAD_REQUEST");
-      }
-
-      const result = dataSchema.safeParse(rawData);
-
-      if (!result.success) {
-        throw new EndpointError("INVALID_REQUEST");
-      }
-
-      data = result.data;
-    }
-
-    const args: EndpointHandlerArgs<
-      InferSchema<TQuery>,
-      InferSchema<TData>,
-      TContext
-    > = {
-      request,
-      query: query as InferSchema<TQuery>,
-      data: data as InferSchema<TData>,
-      context,
-      response,
-    };
-
-    return await this.config.handler(args);
   }
 
   /**
@@ -605,7 +609,7 @@ export class EndpointRegistry<
    * @typeParam TMethod - HTTP method.
    * @typeParam TQuery - Query schema.
    * @typeParam TData - JSON body schema.
-   * @typeParam TResult - Handler result.
+   * @typeParam TResult - Handler response.
    * @typeParam TRouteContext - Route context type.
    *
    * @param config - Route configuration and optional overrides.
@@ -616,7 +620,7 @@ export class EndpointRegistry<
     TMethod extends HttpMethod,
     TQuery extends Schema | undefined = undefined,
     TData extends Schema | undefined = undefined,
-    TResult = unknown,
+    TResult extends Response = Response,
     TRouteContext extends EndpointContext = TContext,
   >(
     config: EndpointRouteConfig<

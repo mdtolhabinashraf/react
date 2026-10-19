@@ -60,6 +60,7 @@ import {
   MemoryRateLimitStore,
   Endpoint,
   EndpointRegistry,
+  normalizePath,
   EndpointClient,
 } from "@tolha/react/server";
 
@@ -243,16 +244,18 @@ The instance exposes:
 - `path`: normalized endpoint pathname.
 - `method`: configured HTTP method.
 - `config`: a frozen, shallow snapshot of the configuration.
-- `handle(request)`: executes the endpoint lifecycle and returns the awaited
-  handler result.
+- `handle(request)`: executes the endpoint lifecycle and returns a native
+  `Response`.
 
 `handle()` executes in this order: create response helpers, resolve context,
 run middleware, validate the query, validate the JSON body, then call the
 handler. If no schema is configured, `query` or `data` is `undefined`.
 Repeated query keys are represented as arrays. A body schema requires a JSON
-content type (`application/json` or a structured `+json` type). Validation
-failures throw configured endpoint errors with `400` status. Errors from
-context, middleware, or the handler are propagated unchanged.
+content type (`application/json` or a structured `+json` type). Validation and
+execution failures are converted to the configured JSON error response, with a
+`400` status for invalid requests and a `500` status for unexpected failures.
+The endpoint does not reject after `handle()` begins; callers should inspect the
+returned response or delegate response handling to their server adapter.
 
 `GET` and `HEAD` endpoints cannot declare `input.dataSchema`. This restriction
 is enforced both by the TypeScript configuration type and at runtime for
@@ -290,7 +293,9 @@ inference. This allows an endpoint's declared result type to flow into
 #### Endpoint inference metadata
 
 Each endpoint exposes a type-only `$infer` property for sharing its route
-contract with other type-safe tools:
+contract with other type-safe tools. The handler must return a native
+`Response`; use the injected response helpers to preserve response-body type
+inference:
 
 ```ts
 const createUser = new Endpoint({
@@ -364,8 +369,21 @@ A route context factory replaces the registry context factory for that route.
 
 Use `Endpoint` and `EndpointRegistry` with a server adapter that performs
 route matching and calls `handle()`. The endpoint utility does not enforce
-request body size limits, authenticate requests, or send an error response
-automatically.
+request body size limits or authenticate requests; those responsibilities remain
+with the server adapter.
+
+### `normalizePath(path)`
+
+Normalizes a pathname by removing empty segments and ensuring that non-root
+paths begin with exactly one slash.
+
+```ts
+normalizePath("//api///users/"); // "/api/users"
+normalizePath(""); // "/"
+```
+
+`Endpoint`, `EndpointRegistry`, and `EndpointClient` use this normalization for
+their route paths.
 
 ---
 
