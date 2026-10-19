@@ -58,7 +58,7 @@ import {
   createRateLimiter,
   MemoryRateLimitStore,
   Endpoint,
-  EndpointDefinition,
+  EndpointRegistry,
 } from "@tolha/react/server";
 
 import type {
@@ -186,15 +186,15 @@ context, middleware, and response helpers. They do not register routes or
 convert thrown errors into HTTP responses; use them from your framework's
 server adapter.
 
-### `EndpointDefinition`
+### `Endpoint`
 
-`EndpointDefinition` represents one concrete route.
+`Endpoint` represents one concrete route.
 
 ```ts
 import { z } from "zod";
-import { EndpointDefinition } from "@tolha/react/server";
+import { Endpoint } from "@tolha/react/server";
 
-const getUser = new EndpointDefinition({
+const getUser = new Endpoint({
   path: "/users/:id",
   method: "GET",
   input: {
@@ -258,7 +258,7 @@ Both handlers and middleware receive `request`, `context`, and `response`.
 Handlers additionally receive parsed `query` and `data` values:
 
 ```ts
-const endpoint = new EndpointDefinition({
+const endpoint = new Endpoint({
   path: "/health",
   method: "GET",
   handler: ({ request, query, data, context, response }) => {
@@ -277,15 +277,15 @@ The response helper methods are:
 | `response.redirect(url, status?)` | Creates a redirect; the default status is `302`. |
 | `response.raw(response)` | Returns an existing native `Response` unchanged. |
 
-### `Endpoint`
+### `EndpointRegistry`
 
-`Endpoint` is a reusable endpoint factory. It shares a base path, context
+`EndpointRegistry` is a reusable endpoint registry. It shares a base path, context
 factory, and middleware across concrete routes.
 
 ```ts
-import { Endpoint } from "@tolha/react/server";
+import { EndpointRegistry } from "@tolha/react/server";
 
-const api = new Endpoint({
+const api = new EndpointRegistry({
   basePath: "/api",
   context: ({ request }) => ({
     requestId: request.headers.get("x-request-id"),
@@ -306,11 +306,11 @@ const listUsers = api.create({
 // listUsers.path is "/api/users"
 ```
 
-`Endpoint` exposes `basePath`, `config`, and `create(config)`.
-`create()` joins and normalizes the factory base path with the route path.
-Factory middleware runs before route middleware by default. Set
+`EndpointRegistry` exposes `basePath`, `config`, and `create(config)`.
+`create()` joins and normalizes the registry base path with the route path.
+Registry middleware runs before route middleware by default. Set
 `middlewareMode: "override"` on a route to use only that route's middleware.
-A route context factory replaces the factory context factory for that route.
+A route context factory replaces the registry context factory for that route.
 
 ### Endpoint types
 
@@ -324,7 +324,7 @@ A route context factory replaces the factory context factory for that route.
   return type.
 - `JoinPaths<TBasePath, TPath>`: compile-time joined route path.
 
-Use `EndpointDefinition` and `Endpoint` with a server adapter that performs
+Use `Endpoint` and `EndpointRegistry` with a server adapter that performs
 route matching and calls `handle()`. The endpoint utility does not enforce
 request body size limits, authenticate requests, or send an error response
 automatically.

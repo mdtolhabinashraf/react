@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   Endpoint,
-  EndpointDefinition,
+  EndpointRegistry,
 } from "../../../src/utils/server/endpoint.js";
 
 function createRequest(
@@ -12,10 +12,10 @@ function createRequest(
   return new Request(path, init);
 }
 
-describe("EndpointDefinition", () => {
+describe("Endpoint", () => {
   describe("configuration", () => {
     it("normalizes the endpoint path", () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "//users//",
         method: "GET",
         handler: () => ({ success: true }),
@@ -27,7 +27,7 @@ describe("EndpointDefinition", () => {
 
     it("freezes the configuration and middleware array", () => {
       const middleware = vi.fn();
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/users",
         method: "GET",
         middleware: [middleware],
@@ -42,7 +42,7 @@ describe("EndpointDefinition", () => {
       const middleware = vi.fn();
       const middlewareList = [middleware];
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/users",
         method: "GET",
         middleware: middlewareList,
@@ -57,7 +57,7 @@ describe("EndpointDefinition", () => {
     it("creates an empty context when no context factory is configured", async () => {
       const handler = vi.fn(({ context }) => context);
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         handler,
@@ -72,7 +72,7 @@ describe("EndpointDefinition", () => {
 
   describe("context", () => {
     it("resolves synchronous request context", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         context: ({ request }) => ({
@@ -89,7 +89,7 @@ describe("EndpointDefinition", () => {
     });
 
     it("resolves asynchronous request context", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         context: async () => ({
@@ -105,7 +105,7 @@ describe("EndpointDefinition", () => {
       const middleware = vi.fn();
       const handler = vi.fn();
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         context: () => {
@@ -128,7 +128,7 @@ describe("EndpointDefinition", () => {
     it("executes middleware sequentially in configured order", async () => {
       const order: string[] = [];
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         middleware: [
@@ -161,7 +161,7 @@ describe("EndpointDefinition", () => {
       let receivedContext: object | undefined;
       let receivedResponse: unknown;
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         context: () => ({ userId: "user_123" }),
@@ -188,7 +188,7 @@ describe("EndpointDefinition", () => {
       const laterMiddleware = vi.fn();
       const handler = vi.fn();
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         middleware: [
@@ -211,7 +211,7 @@ describe("EndpointDefinition", () => {
     it("stops execution when asynchronous middleware rejects", async () => {
       const handler = vi.fn();
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         middleware: [
@@ -232,7 +232,7 @@ describe("EndpointDefinition", () => {
 
   describe("query validation", () => {
     it("parses and validates query parameters", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         input: {
@@ -255,7 +255,7 @@ describe("EndpointDefinition", () => {
     });
 
     it("preserves repeated query parameters as arrays", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         input: {
@@ -280,7 +280,7 @@ describe("EndpointDefinition", () => {
     it("rejects invalid query input", async () => {
       const handler = vi.fn();
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         input: {
@@ -301,7 +301,7 @@ describe("EndpointDefinition", () => {
     });
 
     it("supports Zod transformations", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         input: {
@@ -320,7 +320,7 @@ describe("EndpointDefinition", () => {
     });
 
     it("does not parse query parameters when no query schema is configured", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         handler: ({ query }) => query,
@@ -336,7 +336,7 @@ describe("EndpointDefinition", () => {
 
   describe("JSON body validation", () => {
     it("parses and validates a JSON body", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/users",
         method: "POST",
         input: {
@@ -368,7 +368,7 @@ describe("EndpointDefinition", () => {
     });
 
     it("accepts structured JSON media types", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "POST",
         input: {
@@ -395,7 +395,7 @@ describe("EndpointDefinition", () => {
     it("rejects a missing content type", async () => {
       const handler = vi.fn();
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "POST",
         input: {
@@ -417,7 +417,7 @@ describe("EndpointDefinition", () => {
     });
 
     it("rejects a non-JSON content type", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "POST",
         input: {
@@ -442,7 +442,7 @@ describe("EndpointDefinition", () => {
     it("rejects malformed JSON", async () => {
       const handler = vi.fn();
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "POST",
         input: {
@@ -469,7 +469,7 @@ describe("EndpointDefinition", () => {
     it("rejects invalid JSON body data", async () => {
       const handler = vi.fn();
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "POST",
         input: {
@@ -504,7 +504,7 @@ describe("EndpointDefinition", () => {
         body: JSON.stringify({ name: "Tolha" }),
       });
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "POST",
         handler: () => "done",
@@ -517,7 +517,7 @@ describe("EndpointDefinition", () => {
 
   describe("handler", () => {
     it("returns the handler result", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         handler: () => ({ success: true }),
@@ -529,7 +529,7 @@ describe("EndpointDefinition", () => {
     });
 
     it("awaits asynchronous handler results", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         handler: async () => {
@@ -542,7 +542,7 @@ describe("EndpointDefinition", () => {
     });
 
     it("propagates handler errors", async () => {
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         handler: () => {
@@ -558,7 +558,7 @@ describe("EndpointDefinition", () => {
     it("passes the same request instance to the handler", async () => {
       const request = createRequest();
 
-      const endpoint = new EndpointDefinition({
+      const endpoint = new Endpoint({
         path: "/test",
         method: "GET",
         handler: ({ request: receivedRequest }) => receivedRequest === request,
@@ -569,10 +569,10 @@ describe("EndpointDefinition", () => {
   });
 });
 
-describe("Endpoint factory", () => {
+describe("EndpointRegistry", () => {
   describe("base path and route creation", () => {
     it("joins the base path and route path", async () => {
-      const api = new Endpoint({ basePath: "/api/v1/" });
+      const api = new EndpointRegistry({ basePath: "/api/v1/" });
 
       const endpoint = api.create({
         path: "/users",
@@ -585,7 +585,7 @@ describe("Endpoint factory", () => {
     });
 
     it("normalizes repeated slashes", () => {
-      const api = new Endpoint({ basePath: "//api///v1//" });
+      const api = new EndpointRegistry({ basePath: "//api///v1//" });
 
       const endpoint = api.create({
         path: "//users//",
@@ -598,7 +598,7 @@ describe("Endpoint factory", () => {
     });
 
     it("supports an empty base path", () => {
-      const api = new Endpoint();
+      const api = new EndpointRegistry();
 
       expect(
         api.create({
@@ -610,7 +610,7 @@ describe("Endpoint factory", () => {
     });
 
     it("supports a root route", () => {
-      const api = new Endpoint({ basePath: "/api/v1" });
+      const api = new EndpointRegistry({ basePath: "/api/v1" });
 
       expect(
         api.create({
@@ -622,7 +622,7 @@ describe("Endpoint factory", () => {
     });
 
     it("supports a root base path", () => {
-      const api = new Endpoint({ basePath: "/" });
+      const api = new EndpointRegistry({ basePath: "/" });
 
       expect(
         api.create({
@@ -636,7 +636,7 @@ describe("Endpoint factory", () => {
 
   describe("context inheritance", () => {
     it("inherits the factory context when the route has no context", async () => {
-      const api = new Endpoint({
+      const api = new EndpointRegistry({
         context: () => ({
           userId: "user_123",
           role: "admin",
@@ -664,7 +664,7 @@ describe("Endpoint factory", () => {
         source: "route",
       }));
 
-      const api = new Endpoint({
+      const api = new EndpointRegistry({
         context: factoryContext,
       });
 
@@ -686,7 +686,7 @@ describe("Endpoint factory", () => {
     it("executes factory middleware before route middleware", async () => {
       const order: string[] = [];
 
-      const api = new Endpoint({
+      const api = new EndpointRegistry({
         middleware: [
           () => {
             order.push("factory-1");
@@ -728,7 +728,7 @@ describe("Endpoint factory", () => {
       const factoryMiddleware = vi.fn();
       const routeMiddleware = vi.fn();
 
-      const api = new Endpoint({
+      const api = new EndpointRegistry({
         middleware: [factoryMiddleware],
       });
 
@@ -750,7 +750,7 @@ describe("Endpoint factory", () => {
       const factoryMiddleware = vi.fn();
       const handler = vi.fn();
 
-      const api = new Endpoint({
+      const api = new EndpointRegistry({
         middleware: [factoryMiddleware],
       });
 
@@ -770,7 +770,7 @@ describe("Endpoint factory", () => {
     it("supports factory middleware without route middleware", async () => {
       const middleware = vi.fn();
 
-      const api = new Endpoint({
+      const api = new EndpointRegistry({
         middleware: [middleware],
       });
 
@@ -790,7 +790,7 @@ describe("Endpoint factory", () => {
     it("freezes the factory configuration and middleware array", () => {
       const middleware = vi.fn();
 
-      const api = new Endpoint({
+      const api = new EndpointRegistry({
         basePath: "/api",
         middleware: [middleware],
       });
@@ -804,7 +804,7 @@ describe("Endpoint factory", () => {
       const second = vi.fn();
       const middleware = [first];
 
-      const api = new Endpoint({ middleware });
+      const api = new EndpointRegistry({ middleware });
       middleware.push(second);
 
       const endpoint = api.create({

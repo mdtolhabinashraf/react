@@ -1,7 +1,7 @@
 {
   "name": "@tolha/react",
-  "version": "1.0.0",
-  "description": "A utility library for React",
+  "version": "1.1.0",
+  "description": "Type-safe React utilities for modern TypeScript applications.",
   "license": "MIT",
   "author": "Md. Tolha Bin Ashraf",
   "type": "module",
@@ -10,6 +10,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/mdtolhabinashraf/react.git"
+  },
+  "homepage": "https://github.com/mdtolhabinashraf/react#readme",
+  "bugs": {
+    "url": "https://github.com/mdtolhabinashraf/react/issues"
   },
   "exports": {
     ".": {
@@ -23,7 +27,8 @@
     "./server": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -36,22 +41,29 @@
   "engines": {
     "node": ">=20"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "prepack": "npm run build"
   },
+  "keywords": [
+    "react",
+    "typescript",
+    "react-utilities",
+    "type-safe",
+    "utility-library"
+  ],
   "devDependencies": {
     "@types/react": "^19.3.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
-  "keywords": [
-    "react",
-    "utility"
-  ],
   "dependencies": {
     "zod": "^4.6.7"
   }
