@@ -289,6 +289,9 @@ The response helper methods are:
 The JSON, text, and HTML helpers preserve the response body type for TypeScript
 inference. This allows an endpoint's declared result type to flow into
 `Endpoint` metadata and into the endpoint client.
+Native `Response` values, including values returned through `response.raw()`
+or `response.redirect()`, do not declare a body type and therefore infer as
+`unknown` in the endpoint contract.
 
 #### Endpoint inference metadata
 
@@ -317,8 +320,9 @@ type CreateUser = typeof createUser.$infer;
 ```
 
 `$infer` contains the normalized `path`, HTTP `method`, parsed `query` and
-`data` types, and the response body type inferred from the handler result. It
-exists for type checking only and is not a runtime property.
+`data` types, and the response body type inferred from the handler result. For
+an untyped native `Response`, the response body type is `unknown`. It exists
+for type checking only and is not a runtime property.
 
 ### `EndpointRegistry`
 
@@ -492,6 +496,10 @@ Additional Apexa request options, such as headers, can be supplied unchanged.
 `data` is translated to Apexa's request body argument and is not forwarded as
 an extra request option. Each method returns `Promise<ApiResponse<TResult>>`,
 where `TResult` is the response body type inferred from the endpoint contract.
+Endpoints that return a native `Response` directly, or use `response.raw()` or
+`response.redirect()`, return `ApiResponse<unknown>` because the body cannot be
+inferred from the Fetch `Response` type. Use `response.json()`, `response.text()`,
+or `response.html()` when the client should receive a specific body type.
 
 The client currently supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`,
 and `OPTIONS`. Route matching, authentication, retries, and response error
