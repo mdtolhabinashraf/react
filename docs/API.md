@@ -95,6 +95,13 @@ import type {
 import { z } from "zod";
 ```
 
+`apexa` is also a runtime dependency. It powers the HTTP requests made by
+`EndpointClient`.
+
+```ts
+import { Apexa } from "apexa";
+```
+
 The `@tolha/react/browser` subpath is reserved for browser-specific exports.
 The current package does not expose additional browser utilities from that
 entry point.
@@ -229,15 +236,15 @@ const result = await getUser.handle(
 
 #### Constructor configuration
 
-| Property | Type | Required | Description |
-| --- | --- | --- | --- |
-| `path` | `string` | Yes | Route pathname. Repeated or trailing slashes are normalized. |
-| `method` | `HttpMethod` | Yes | HTTP method handled by the endpoint. |
-| `input.querySchema` | Zod schema | No | Validates parsed URL query parameters. |
-| `input.dataSchema` | Zod schema | No | Validates a JSON request body. |
-| `context` | `EndpointContextFactory` | No | Creates request-scoped context before middleware runs. |
-| `middleware` | `EndpointMiddleware[]` | No | Sequential hooks executed before validation and the handler. |
-| `handler` | `EndpointHandler` | Yes | Produces the endpoint result. |
+| Property            | Type                     | Required | Description                                                  |
+| ------------------- | ------------------------ | -------- | ------------------------------------------------------------ |
+| `path`              | `string`                 | Yes      | Route pathname. Repeated or trailing slashes are normalized. |
+| `method`            | `HttpMethod`             | Yes      | HTTP method handled by the endpoint.                         |
+| `input.querySchema` | Zod schema               | No       | Validates parsed URL query parameters.                       |
+| `input.dataSchema`  | Zod schema               | No       | Validates a JSON request body.                               |
+| `context`           | `EndpointContextFactory` | No       | Creates request-scoped context before middleware runs.       |
+| `middleware`        | `EndpointMiddleware[]`   | No       | Sequential hooks executed before validation and the handler. |
+| `handler`           | `EndpointHandler`        | Yes      | Produces the endpoint result.                                |
 
 The instance exposes:
 
@@ -278,13 +285,13 @@ const endpoint = new Endpoint({
 
 The response helper methods are:
 
-| Method | Description |
-| --- | --- |
-| `response.json(body, init?)` | Creates a JSON response and sets `application/json; charset=utf-8` when absent. |
-| `response.text(body, init?)` | Creates a plain-text response and sets `text/plain; charset=utf-8` when absent. |
-| `response.html(body, init?)` | Creates an HTML response and sets `text/html; charset=utf-8` when absent. |
-| `response.redirect(url, status?)` | Creates a redirect; the default status is `302`. |
-| `response.raw(response)` | Returns an existing native `Response` unchanged. |
+| Method                            | Description                                                                     |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| `response.json(body, init?)`      | Creates a JSON response and sets `application/json; charset=utf-8` when absent. |
+| `response.text(body, init?)`      | Creates a plain-text response and sets `text/plain; charset=utf-8` when absent. |
+| `response.html(body, init?)`      | Creates an HTML response and sets `text/html; charset=utf-8` when absent.       |
+| `response.redirect(url, status?)` | Creates a redirect; the default status is `302`.                                |
+| `response.raw(response)`          | Returns an existing native `Response` unchanged.                                |
 
 The JSON, text, and HTML helpers preserve the response body type for TypeScript
 inference. This allows an endpoint's declared result type to flow into
@@ -455,9 +462,9 @@ const existing = await client.users["user-123"].get({
 Creates a lazy, type-safe route proxy backed by Apexa. The returned value is
 used directly as the route tree:
 
-| Option | Type | Required | Description |
-| --- | --- | --- | --- |
-| `options` | `ClientOptions` | No | Apexa client configuration, including `baseUrl` and other request defaults. |
+| Option    | Type            | Required | Description                                                                 |
+| --------- | --------------- | -------- | --------------------------------------------------------------------------- |
+| `options` | `ClientOptions` | No       | Apexa client configuration, including `baseUrl` and other request defaults. |
 
 The returned route proxy supports direct chained access:
 
