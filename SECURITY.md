@@ -10,7 +10,8 @@ authorization, deployment hardening, and operational monitoring.
 The latest published release is the only version targeted for security fixes.
 The package currently requires Node.js 20 or newer.
 
-Until the first stable release (`1.0.0`) is published, formal support commitments have not yet been established. Users are encouraged to upgrade to the latest available version.
+Security fixes are targeted at the latest stable release. Users should
+upgrade to the latest available version before reporting or deploying fixes.
 
 | Version        | Supported                          |
 | -------------- | ---------------------------------- |

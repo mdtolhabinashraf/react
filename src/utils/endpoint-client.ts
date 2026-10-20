@@ -14,14 +14,42 @@
  * @packageDocumentation
  */
 
-import { normalizePath } from "./endpoint.js";
+import { EndpointError, normalizePath } from "./server/endpoint.js";
 import {
   Apexa,
-  type ApiResponse,
-  type ClientOptions,
+  type ApexaResponse,
+  type ApexaOptions,
+  type ApexaErrorOptions,
   type HttpMethod,
-  type RequestOptions,
+  type ApexaRequestOptions,
 } from "apexa";
+
+/**
+ * Adapts Apexa's `(message, options)` error constructor contract to the
+ * preset-based `EndpointError` constructor.
+ *
+ * @param message - Message returned by Apexa's error policy.
+ * @param options - Apexa error metadata and the failed response.
+ */
+export class EndpointClientError extends EndpointError {
+  public constructor(message: string, options: ApexaErrorOptions) {
+    super(
+      {
+        code: options.code,
+        message,
+        status: options.response?.status ?? 500,
+        priority: options.priority ?? "medium",
+        details: {
+          response: options.response,
+          config: options.config,
+        },
+      },
+      {
+        cause: options.cause,
+      },
+    );
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                  Utilities                                 */
@@ -77,7 +105,10 @@ type EndpointInferRecord = {
  * The client exposes `data` instead of Apexa's `body`, and determines
  * the HTTP method from the endpoint definition.
  */
-type EndpointRequestOptions = Omit<RequestOptions, "body" | "method" | "query">;
+type EndpointRequestOptions = Omit<
+  ApexaRequestOptions,
+  "body" | "method" | "query"
+>;
 
 /**
  * Makes query optional only when undefined is allowed by its type.
@@ -128,11 +159,11 @@ type LeafMethod<TMethod extends string, TQuery, TData, TResult> = {
     | "delete"
     | "head"
     | "options"
-    ? (options?: ReadRequestOptions<TQuery>) => Promise<ApiResponse<TResult>>
+    ? (options?: ReadRequestOptions<TQuery>) => Promise<ApexaResponse<TResult>>
     : M extends "post" | "put" | "patch"
       ? (
           options: MutationRequestOptions<TQuery, TData>,
-        ) => Promise<ApiResponse<TResult>>
+        ) => Promise<ApexaResponse<TResult>>
       : never;
 };
 
@@ -306,7 +337,7 @@ export type EndpointClientInstance<
  */
 export interface EndpointClientConstructor {
   new <TEndpoints extends readonly EndpointInferRecord[]>(
-    options?: ClientOptions,
+    options?: ApexaOptions,
   ): EndpointClientInstance<TEndpoints>;
 }
 
@@ -331,12 +362,29 @@ const HTTP_METHODS = new Set<string>([
  * Internal endpoint client implementation.
  */
 class EndpointClientImpl<TEndpoints extends readonly EndpointInferRecord[]> {
+  private readonly config: ApexaOptions | undefined;
+
+  /** Underlying Apexa HTTP client. */
   public readonly client: Apexa;
 
+  /** Nested, type-safe API. */
   public readonly api: ClientTree<TEndpoints>;
 
-  public constructor(options?: ClientOptions) {
-    this.client = new Apexa(options);
+  public constructor(options?: ApexaOptions) {
+    this.config = options;
+
+    if (!this.config?.error?.customError) {
+      this.config = {
+        ...this.config,
+        error: {
+          ...this.config?.error,
+          customError: EndpointClientError,
+        },
+      };
+    }
+
+    this.client = new Apexa(this.config);
+
     this.api = this.createProxy([]) as ClientTree<TEndpoints>;
 
     /**
@@ -390,11 +438,11 @@ class EndpointClientImpl<TEndpoints extends readonly EndpointInferRecord[]> {
            * Translate public `data` to Apexa's `body`.
            * The caller's request object is never mutated.
            */
-          const data = options.data as RequestOptions["body"] | undefined;
+          const data = options.data as ApexaRequestOptions["body"] | undefined;
 
           delete options.data;
 
-          const requestConfig = options as RequestOptions;
+          const requestConfig = options as ApexaRequestOptions;
 
           switch (method) {
             case "get":
