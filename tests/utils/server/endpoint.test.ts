@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
 import type { HttpMethod } from "apexa";
 
@@ -119,6 +119,35 @@ describe("Endpoint configuration", () => {
 });
 
 describe("Endpoint response helper integration", () => {
+  it("uses unknown for native and raw response bodies", () => {
+    const nativeEndpoint = new Endpoint({
+      path: "/native",
+      method: "GET",
+      handler: async () =>
+        new Response("native", {
+          headers: {
+            "Content-Type": "text/plain",
+          },
+        }),
+    });
+
+    const rawEndpoint = new Endpoint({
+      path: "/raw",
+      method: "GET",
+      handler: ({ response }) => response.raw(new Response("raw")),
+    });
+
+    const typedEndpoint = new Endpoint({
+      path: "/typed",
+      method: "GET",
+      handler: ({ response }) => response.text("typed"),
+    });
+
+    expectTypeOf<typeof nativeEndpoint.$infer.result>().toEqualTypeOf<unknown>();
+    expectTypeOf<typeof rawEndpoint.$infer.result>().toEqualTypeOf<unknown>();
+    expectTypeOf<typeof typedEndpoint.$infer.result>().toEqualTypeOf<string>();
+  });
+
   it("uses response.json() in the handler", async () => {
     const endpoint = new Endpoint({
       path: "/users",

@@ -55,14 +55,14 @@ export type EndpointContextFactory<
 /**
  * Extracts the declared response body type from a typed Response.
  *
- * Falls back to the original result type when no response body type
- * is declared.
+ * Falls back to unknown when no response body type is declared. Native
+ * Response instances do not expose a body type to the endpoint client.
  */
 type InferResponseBody<TResult> = TResult extends {
   readonly [responseBodyType]?: infer TBody;
 }
   ? NonNullable<TBody>
-  : TResult;
+  : unknown;
 
 /**
  * Methods that cannot declare a request body in this endpoint API.
