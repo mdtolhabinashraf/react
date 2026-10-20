@@ -26,9 +26,9 @@ npm install @tolha/react
 
 ## Imports
 
-The package has a browser-safe root entry point and a server entry point. Import
-UUID and application-error utilities from `@tolha/react`; import request and
-endpoint utilities from `@tolha/react/server`.
+The package has a root entry point and a server entry point. Import general
+utilities and `EndpointClient` from `@tolha/react`; import server-side request
+and endpoint utilities from `@tolha/react/server`.
 
 ```ts
 import {
@@ -39,6 +39,8 @@ import {
   isConfiguredAppError,
   defaultErrorPreset,
   APP_ERROR_BRAND,
+  EndpointClient,
+  EndpointClientError,
 } from "@tolha/react";
 
 import type {
@@ -60,8 +62,8 @@ import {
   MemoryRateLimitStore,
   Endpoint,
   EndpointRegistry,
+  EndpointError,
   normalizePath,
-  EndpointClient,
 } from "@tolha/react/server";
 
 import type {
@@ -100,6 +102,13 @@ import { z } from "zod";
 
 ```ts
 import { Apexa } from "apexa";
+```
+
+Use Apexa's v2 response and client option types when referring to the
+`EndpointClient` contract:
+
+```ts
+import type { ApexaOptions, ApexaResponse } from "apexa";
 ```
 
 The `@tolha/react/browser` subpath is reserved for browser-specific exports.
@@ -331,6 +340,19 @@ type CreateUser = typeof createUser.$infer;
 an untyped native `Response`, the response body type is `unknown`. It exists
 for type checking only and is not a runtime property.
 
+### `EndpointError`
+
+`EndpointError` is the configured application-error class used by endpoint
+execution. It is exported from `@tolha/react/server` and provides the
+standardized `code`, `message`, `status`, `priority`, and optional `cause`
+properties used by the endpoint error response helpers.
+
+```ts
+import { EndpointError } from "@tolha/react/server";
+
+throw new EndpointError("BAD_REQUEST");
+```
+
 ### `EndpointRegistry`
 
 `EndpointRegistry` is a reusable endpoint registry. It shares a base path, context
@@ -401,14 +423,15 @@ their route paths.
 ## Endpoint Client
 
 `EndpointClient` is a type-safe client for calling endpoint contracts from
-another part of an application. It is exported from `@tolha/react/server` and
-uses Apexa for HTTP requests.
+another part of an application. It is exported from `@tolha/react` and uses
+Apexa for HTTP requests.
 
 The client accepts a tuple of endpoint metadata types. In practice, these can
 come from `Endpoint` instances through their type-only `$infer` property:
 
 ```ts
-import { Endpoint, EndpointClient } from "@tolha/react/server";
+import { EndpointClient } from "@tolha/react";
+import { Endpoint } from "@tolha/react/server";
 import { z } from "zod";
 
 const createUser = new Endpoint({
@@ -464,7 +487,7 @@ used directly as the route tree:
 
 | Option    | Type            | Required | Description                                                                 |
 | --------- | --------------- | -------- | --------------------------------------------------------------------------- |
-| `options` | `ClientOptions` | No       | Apexa client configuration, including `baseUrl` and other request defaults. |
+| `options` | `ApexaOptions` | No       | Apexa client configuration, including `baseUrl`, error handling, and request defaults. |
 
 The returned route proxy supports direct chained access:
 
@@ -501,16 +524,39 @@ with `data` for the request body. Query parameters are passed through `query`.
 Additional Apexa request options, such as headers, can be supplied unchanged.
 
 `data` is translated to Apexa's request body argument and is not forwarded as
-an extra request option. Each method returns `Promise<ApiResponse<TResult>>`,
+an extra request option. Each method returns `Promise<ApexaResponse<TResult>>`,
 where `TResult` is the response body type inferred from the endpoint contract.
 Endpoints that return a native `Response` directly, or use `response.raw()` or
-`response.redirect()`, return `ApiResponse<unknown>` because the body cannot be
+`response.redirect()`, return `ApexaResponse<unknown>` because the body cannot be
 inferred from the Fetch `Response` type. Use `response.json()`, `response.text()`,
 or `response.html()` when the client should receive a specific body type.
 
 The client currently supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`,
-and `OPTIONS`. Route matching, authentication, retries, and response error
-handling remain responsibilities of the underlying HTTP client and application.
+and `OPTIONS`. When no custom Apexa error handler is supplied, failed requests
+use the exported `EndpointClientError` adapter, which preserves Apexa's error
+code, priority, response status, and cause through this package's
+`EndpointError` format. Route matching, authentication, and retries remain
+responsibilities of the underlying HTTP client and application.
+
+### `EndpointClientError`
+
+`EndpointClientError` is the error adapter used by `EndpointClient` when no
+custom Apexa error constructor is configured. It is exported from
+`@tolha/react` and extends `EndpointError`, adapting Apexa's
+`(message, options)` error-constructor contract to the package's standardized
+application-error format.
+
+Provide `error.customError` in the client options to use another error class:
+
+```ts
+import { EndpointClient, EndpointClientError } from "@tolha/react";
+
+const client = new EndpointClient({
+  error: {
+    customError: EndpointClientError,
+  },
+});
+```
 
 ---
 

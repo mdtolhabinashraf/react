@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectTypeOf } from "vitest";
-import type { ApiResponse } from "apexa";
-import { EndpointClient } from "../../../src/utils/server/endpoint-client";
+import type { ApexaResponse } from "apexa";
+import {
+  EndpointClient,
+  EndpointClientError,
+} from "../../src/utils/endpoint-client";
 
 /* -------------------------------------------------------------------------- */
 /*                                  Fixtures                                  */
@@ -62,11 +65,43 @@ type DeleteUser = {
   };
 };
 
+type ReplaceUser = {
+  readonly path: "/users/[userId]";
+  readonly method: "PUT";
+  readonly query: undefined;
+  readonly data: {
+    name: string;
+  };
+  readonly result: {
+    id: string;
+    name: string;
+  };
+};
+
+type HeadUser = {
+  readonly path: "/users/[userId]";
+  readonly method: "HEAD";
+  readonly query: undefined;
+  readonly data: undefined;
+  readonly result: undefined;
+};
+
+type UserOptions = {
+  readonly path: "/users/[userId]";
+  readonly method: "OPTIONS";
+  readonly query: undefined;
+  readonly data: undefined;
+  readonly result: {
+    allow: string;
+  };
+};
+
 /* -------------------------------------------------------------------------- */
 /*                                Mock Apexa                                  */
 /* -------------------------------------------------------------------------- */
 
 const mocks = vi.hoisted(() => ({
+  constructor: vi.fn(),
   get: vi.fn(),
   post: vi.fn(),
   put: vi.fn(),
@@ -79,6 +114,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("apexa", () => ({
   Apexa: class MockApexa {
+    public constructor(options?: unknown) {
+      mocks.constructor(options);
+    }
+
     get = mocks.get;
     post = mocks.post;
     put = mocks.put;
@@ -120,9 +159,26 @@ describe("EndpointClient", () => {
       },
     });
 
+    mocks.put.mockResolvedValue({
+      data: {
+        id: "user-1",
+        name: "Tolha",
+      },
+    });
+
     mocks.delete.mockResolvedValue({
       data: {
         deleted: true,
+      },
+    });
+
+    mocks.head.mockResolvedValue({
+      data: undefined,
+    });
+
+    mocks.options.mockResolvedValue({
+      data: {
+        allow: "GET, HEAD, OPTIONS",
       },
     });
   });
@@ -298,6 +354,46 @@ describe("EndpointClient", () => {
 
       expect(mocks.delete).toHaveBeenCalledWith("/users/user-id", {});
     });
+
+    it("dispatches PUT with request data", async () => {
+      const client = new EndpointClient<[ReplaceUser]>();
+
+      await client.api.users.userId.put({
+        data: {
+          name: "Tolha",
+        },
+      });
+
+      expect(mocks.put).toHaveBeenCalledWith(
+        "/users/user-id",
+        { name: "Tolha" },
+        {},
+      );
+    });
+
+    it("dispatches HEAD without a request body", async () => {
+      const client = new EndpointClient<[HeadUser]>();
+
+      await client.api.users.userId.head();
+
+      expect(mocks.head).toHaveBeenCalledWith("/users/user-id", {});
+    });
+
+    it("dispatches OPTIONS and forwards request options", async () => {
+      const client = new EndpointClient<[UserOptions]>();
+
+      await client.api.users.userId.options({
+        headers: {
+          accept: "application/json",
+        },
+      });
+
+      expect(mocks.options).toHaveBeenCalledWith("/users/user-id", {
+        headers: {
+          accept: "application/json",
+        },
+      });
+    });
   });
 
   describe("instance properties", () => {
@@ -306,6 +402,91 @@ describe("EndpointClient", () => {
 
       expect(client.client).toBeDefined();
       expect(client.api).toBeDefined();
+    });
+
+    it("configures EndpointClientError as the default Apexa error class", () => {
+      new EndpointClient<[Signup]>();
+
+      expect(mocks.constructor).toHaveBeenCalledWith({
+        error: {
+          customError: EndpointClientError,
+        },
+      });
+    });
+
+    describe("EndpointClientError", () => {
+      it("maps Apexa error metadata to EndpointError", () => {
+        const cause = new Error("network failure");
+        const response = {
+          status: 503,
+        } as ApexaResponse<unknown>;
+
+        const error = new EndpointClientError("Request failed", {
+          code: "NETWORK_ERROR",
+          priority: "high",
+          response,
+          cause,
+        });
+
+        expect(error).toBeInstanceOf(Error);
+        expect(error.name).toBe("EndpointError");
+        expect(error.code).toBe("NETWORK_ERROR");
+        expect(error.message).toBe("Request failed");
+        expect(error.status).toBe(503);
+        expect(error.priority).toBe("high");
+        expect(error.details).toEqual({
+          response,
+          config: undefined,
+        });
+        expect(error.cause).toBe(cause);
+      });
+
+      it("uses safe defaults when Apexa omits optional metadata", () => {
+        const error = new EndpointClientError("Request failed", {
+          code: "UNKNOWN",
+        });
+
+        expect(error.status).toBe(500);
+        expect(error.priority).toBe("medium");
+        expect(error.cause).toBeUndefined();
+      });
+    });
+
+    it("preserves an explicitly configured Apexa error class", () => {
+      class CustomError extends Error {}
+
+      new EndpointClient<[Signup]>({
+        error: {
+          customError: CustomError,
+        },
+      });
+
+      expect(mocks.constructor).toHaveBeenCalledWith({
+        error: {
+          customError: CustomError,
+        },
+      });
+    });
+
+    it("adds the default error class when only a custom handler is configured", () => {
+      const handler = () => ({
+        message: "Request failed",
+        code: "REQUEST_FAILED",
+        priority: "medium" as const,
+      });
+
+      new EndpointClient<[Signup]>({
+        error: {
+          handler,
+        },
+      });
+
+      expect(mocks.constructor).toHaveBeenCalledWith({
+        error: {
+          handler,
+          customError: EndpointClientError,
+        },
+      });
     });
   });
 });
@@ -337,11 +518,11 @@ describe("EndpointClient type inference", () => {
     });
 
     expectTypeOf(postPromise).toEqualTypeOf<
-      Promise<ApiResponse<SignupResult>>
+      Promise<ApexaResponse<SignupResult>>
     >();
 
     expectTypeOf(getPromise).toEqualTypeOf<
-      Promise<ApiResponse<SignupGetResult>>
+      Promise<ApexaResponse<SignupGetResult>>
     >();
   });
 
@@ -390,11 +571,29 @@ describe("EndpointClient type inference", () => {
     const deletePromise = client.api.users.userId.delete();
 
     expectTypeOf(patchPromise).toEqualTypeOf<
-      Promise<ApiResponse<UpdateUser["result"]>>
+      Promise<ApexaResponse<UpdateUser["result"]>>
     >();
 
     expectTypeOf(deletePromise).toEqualTypeOf<
-      Promise<ApiResponse<DeleteUser["result"]>>
+      Promise<ApexaResponse<DeleteUser["result"]>>
+    >();
+  });
+
+  it("types PUT, HEAD, and OPTIONS methods", () => {
+    const client = new EndpointClient<[ReplaceUser, HeadUser, UserOptions]>();
+
+    expectTypeOf(client.api.users.userId.put).toBeFunction();
+    expectTypeOf(client.api.users.userId.head).toBeFunction();
+    expectTypeOf(client.api.users.userId.options).toBeFunction();
+
+    expectTypeOf(
+      client.api.users.userId.put({ data: { name: "Tolha" } }),
+    ).toEqualTypeOf<Promise<ApexaResponse<ReplaceUser["result"]>>>();
+    expectTypeOf(client.api.users.userId.head()).toEqualTypeOf<
+      Promise<ApexaResponse<HeadUser["result"]>>
+    >();
+    expectTypeOf(client.api.users.userId.options()).toEqualTypeOf<
+      Promise<ApexaResponse<UserOptions["result"]>>
     >();
   });
 
@@ -415,11 +614,11 @@ describe("EndpointClient type inference", () => {
     });
 
     expectTypeOf(signupPromise).toEqualTypeOf<
-      Promise<ApiResponse<SignupResult>>
+      Promise<ApexaResponse<SignupResult>>
     >();
 
     expectTypeOf(updatePromise).toEqualTypeOf<
-      Promise<ApiResponse<UpdateUser["result"]>>
+      Promise<ApexaResponse<UpdateUser["result"]>>
     >();
   });
 });

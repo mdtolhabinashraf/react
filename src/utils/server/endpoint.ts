@@ -8,13 +8,13 @@
 import { z } from "zod";
 import type { HttpMethod } from "apexa";
 import type { responseBodyType } from "../internal/response-helpers.js";
-import { createAppError } from "../app-error.js";
+import { createAppError, type APP_ERROR_BRAND } from "../app-error.js";
 import {
   createResponseHelpers,
   type EndpointResponseHelpers,
 } from "../internal/response-helpers.js";
 
-const EndpointError = createAppError({
+export const EndpointError = createAppError({
   name: "EndpointError",
 });
 
