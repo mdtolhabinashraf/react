@@ -1,6 +1,6 @@
 {
   "name": "@tolha/react",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Type-safe React utilities for modern TypeScript applications.",
   "license": "MIT",
   "author": "Md. Tolha Bin Ashraf",
@@ -65,7 +65,7 @@
     "vitest": "^5.0.5"
   },
   "dependencies": {
-    "apexa": "^1.0.0",
+    "apexa": "^1.0.1",
     "zod": "^4.6.7"
   }
 }

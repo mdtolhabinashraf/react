@@ -160,6 +160,22 @@ export type ErrorResponseBody = {
 };
 
 /**
+ * Safe, normalized representation of an application error.
+ */
+export type NormalizedAppError = AppErrorPreset;
+
+/**
+ * Callable response helper with explicit JSON and plain-text variants.
+ */
+export type AppErrorResponse = {
+  (error: unknown): Response;
+  /** Creates a standardized JSON error response. */
+  json(error: unknown): Response;
+  /** Creates a safe plain-text error response. */
+  text(error: unknown): Response;
+};
+
+/**
  * Identifies application errors across package instances.
  */
 export const APP_ERROR_BRAND: unique symbol = Symbol.for(
@@ -278,7 +294,7 @@ const INTERNAL_SERVER_PRESET: AppErrorPreset =
  * @param error - Error or unknown value to resolve.
  * @returns The safe error response representation.
  */
-function resolveError(error: unknown): AppErrorPreset {
+export function getError(error: unknown): NormalizedAppError {
   if (!isConfiguredAppError(error)) {
     return INTERNAL_SERVER_PRESET;
   }
@@ -293,16 +309,23 @@ function resolveError(error: unknown): AppErrorPreset {
 }
 
 /**
- * Serializes an error response and handles non-serializable details.
+ * Converts an error into a standardized JSON HTTP response.
  *
  * When serialization fails, optional details are omitted and a minimal
  * JSON error response is returned.
  *
- * @param body - Response body to serialize.
- * @param status - HTTP response status.
+ * @param error - Error or unknown value to convert.
  * @returns A JSON HTTP response.
  */
-function createJsonResponse(body: ErrorResponseBody, status: number): Response {
+export function jsonErrorResponse(error: unknown): Response {
+  const resolved = getError(error);
+  const body: ErrorResponseBody = {
+    error: {
+      code: resolved.code,
+      message: resolved.message,
+      ...(resolved.details !== undefined ? { details: resolved.details } : {}),
+    },
+  };
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
   };
@@ -312,7 +335,7 @@ function createJsonResponse(body: ErrorResponseBody, status: number): Response {
 
     if (serialized !== undefined) {
       return new Response(serialized, {
-        status,
+        status: resolved.status,
         headers,
       });
     }
@@ -328,39 +351,38 @@ function createJsonResponse(body: ErrorResponseBody, status: number): Response {
   };
 
   return new Response(JSON.stringify(fallbackBody), {
-    status,
+    status: resolved.status,
     headers,
   });
 }
 
 /**
- * Converts an error into a standardized JSON HTTP response.
- *
- * Application errors retain their configured status, code, message,
- * and optional details. Unexpected errors receive a generic 500 response
- * so that internal exception messages and stack traces are not exposed.
+ * Converts an error into a safe plain-text HTTP response.
  *
  * @param error - Error or unknown value to convert.
- * @returns A JSON HTTP response.
- *
- * @example
- * ```ts
- * return ErrorResponse(new Error("Unexpected failure"));
- * ```
+ * @returns A plain-text HTTP response.
  */
-export function ErrorResponse(error: unknown): Response {
-  const resolved = resolveError(error);
+function textErrorResponse(error: unknown): Response {
+  const resolved = getError(error);
 
-  const body: ErrorResponseBody = {
-    error: {
-      code: resolved.code,
-      message: resolved.message,
-      ...(resolved.details !== undefined ? { details: resolved.details } : {}),
+  return new Response(resolved.message, {
+    status: resolved.status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
     },
-  };
-
-  return createJsonResponse(body, resolved.status);
+  });
 }
+
+/**
+ * Creates the callable response API exposed by configured application errors.
+ */
+const appErrorResponse: AppErrorResponse = Object.assign(
+  (error: unknown) => jsonErrorResponse(error),
+  {
+    json: (error: unknown) => jsonErrorResponse(error),
+    text: textErrorResponse,
+  },
+);
 
 /**
  * Creates a configured application error class.
@@ -548,7 +570,8 @@ export function createAppError<
     /**
      * Converts an error into a standardized JSON HTTP response.
      *
-     * This static method delegates to {@link ErrorResponse}.
+     * This static helper supports the callable form and the explicit
+     * {@link AppErrorResponse.json} and {@link AppErrorResponse.text} forms.
      *
      * @param error - Error or unknown value to convert.
      * @returns A JSON HTTP response.
@@ -558,8 +581,16 @@ export function createAppError<
      * return AppError.response(new AppError("FORBIDDEN"));
      * ```
      */
-    public static response(error: unknown): Response {
-      return ErrorResponse(error);
+    public static readonly response = appErrorResponse;
+
+    /**
+     * Normalizes an unknown value into a safe application error.
+     *
+     * @param error - Error or unknown value to normalize.
+     * @returns A standardized error representation.
+     */
+    public static getError(error: unknown): NormalizedAppError {
+      return getError(error);
     }
   }
 

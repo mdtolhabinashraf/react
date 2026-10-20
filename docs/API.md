@@ -34,7 +34,7 @@ endpoint utilities from `@tolha/react/server`.
 import {
   UUID,
   createAppError,
-  ErrorResponse,
+  jsonErrorResponse,
   isAppErrorPreset,
   isConfiguredAppError,
   defaultErrorPreset,
@@ -940,7 +940,8 @@ Passing a native `Error` creates an application error using the internal-server 
 
 ### `AppError.response(error)`
 
-Converts an error into a standardized JSON HTTP response.
+Converts an error into a standardized JSON HTTP response. The callable form
+is equivalent to `AppError.response.json(error)`.
 
 ```ts
 return AppError.response(new AppError("FORBIDDEN"));
@@ -950,19 +951,46 @@ return AppError.response(new AppError("FORBIDDEN"));
 
 **Returns:** `Response`
 
-This method delegates to `ErrorResponse()`.
+This method delegates to `jsonErrorResponse()`.
 
-### `ErrorResponse(error)`
+### `AppError.response.json(error)` and `AppError.response.text(error)`
+
+The explicit response helpers create either a standardized JSON response or a
+safe plain-text response while preserving the normalized error status.
+
+```ts
+return AppError.response.json(error);
+return AppError.response.text(error);
+```
+
+Both methods accept `error: unknown` and return a `Response`. The JSON helper
+uses `application/json; charset=utf-8`; the text helper uses
+`text/plain; charset=utf-8` and returns the safe normalized message.
+
+### `AppError.getError(error)`
+
+Normalizes an error or unknown value into a safe application error
+representation.
+
+```ts
+const normalized = AppError.getError(error);
+```
+
+The returned value includes `code`, `message`, `status`, `priority`, and
+optional `details`. Unexpected errors are replaced with the generic internal
+server preset so sensitive exception messages are not exposed.
+
+### `jsonErrorResponse(error)`
 
 Converts an error or unknown value into a standardized JSON HTTP response.
 
 ```ts
-import { ErrorResponse } from "@tolha/react";
+import { jsonErrorResponse } from "@tolha/react";
 
 try {
   // Application operation
 } catch (error: unknown) {
-  return ErrorResponse(error);
+  return jsonErrorResponse(error);
 }
 ```
 

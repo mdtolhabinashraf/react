@@ -89,7 +89,7 @@ Please allow maintainers reasonable time to investigate, develop a fix, and coor
 - Avoid returning internal stack traces, database details, filesystem paths, credentials, or other sensitive implementation details to clients.
 - Use generic error responses for unexpected server errors.
 - Include error details in responses only when they are safe to disclose.
-- `ErrorResponse()` intentionally replaces unexpected errors with a generic
+- `jsonErrorResponse()` intentionally replaces unexpected errors with a generic
   internal-server response. Preserve that behavior at framework boundaries.
 
 ### Input Validation

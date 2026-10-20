@@ -4,9 +4,10 @@ import {
   APP_ERROR_BRAND,
   createAppError,
   defaultErrorPreset,
-  ErrorResponse,
+  getError,
   isAppErrorPreset,
   isConfiguredAppError,
+  jsonErrorResponse,
 } from "../../src/utils/app-error";
 
 const AppError = createAppError({
@@ -214,13 +215,13 @@ describe("createAppError", () => {
   });
 });
 
-describe("ErrorResponse", () => {
+describe("jsonErrorResponse", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it("returns a JSON response for a configured application error", async () => {
-    const response = ErrorResponse(new AppError("USER_NOT_FOUND"));
+    const response = jsonErrorResponse(new AppError("USER_NOT_FOUND"));
 
     expect(response).toBeInstanceOf(Response);
     expect(response.status).toBe(404);
@@ -247,6 +248,42 @@ describe("ErrorResponse", () => {
     });
   });
 
+  it("normalizes configured and unexpected errors", () => {
+    expect(AppError.getError(new AppError("FORBIDDEN"))).toEqual({
+      code: "FORBIDDEN",
+      message: "You do not have permission to perform this action.",
+      status: 403,
+      priority: "medium",
+    });
+
+    expect(getError(new Error("Sensitive failure"))).toEqual(
+      defaultErrorPreset.INTERNAL_SERVER,
+    );
+  });
+
+  it("supports explicit JSON and plain-text response helpers", async () => {
+    const error = new AppError("FORBIDDEN");
+    const jsonResponse = AppError.response.json(error);
+    const textResponse = AppError.response.text(error);
+
+    expect(jsonResponse.status).toBe(403);
+    expect(jsonResponse.headers.get("content-type")).toContain(
+      "application/json",
+    );
+    await expect(jsonResponse.json()).resolves.toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "You do not have permission to perform this action.",
+      },
+    });
+
+    expect(textResponse.status).toBe(403);
+    expect(textResponse.headers.get("content-type")).toContain("text/plain");
+    await expect(textResponse.text()).resolves.toBe(
+      "You do not have permission to perform this action.",
+    );
+  });
+
   it("includes safe error details in the response", async () => {
     const error = new AppError("INVALID_REQUEST", {
       details: {
@@ -254,7 +291,7 @@ describe("ErrorResponse", () => {
       },
     });
 
-    const response = ErrorResponse(error);
+    const response = jsonErrorResponse(error);
 
     expect(await response.json()).toEqual({
       error: {
@@ -268,7 +305,7 @@ describe("ErrorResponse", () => {
   });
 
   it("returns a generic 500 for ordinary errors", async () => {
-    const response = ErrorResponse(
+    const response = jsonErrorResponse(
       new Error("Sensitive database connection string"),
     );
 
@@ -289,7 +326,7 @@ describe("ErrorResponse", () => {
   });
 
   it("returns a generic 500 for non-error values", async () => {
-    const response = ErrorResponse("unexpected string");
+    const response = jsonErrorResponse("unexpected string");
 
     expect(response.status).toBe(500);
 
@@ -309,7 +346,7 @@ describe("ErrorResponse", () => {
       details: circular,
     });
 
-    const response = ErrorResponse(error);
+    const response = jsonErrorResponse(error);
 
     expect(response.status).toBe(400);
 
