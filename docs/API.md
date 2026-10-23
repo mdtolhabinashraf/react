@@ -34,6 +34,7 @@ and endpoint utilities from `@tolha/react/server`.
 import {
   UUID,
   createAppError,
+  normalizeError,
   jsonErrorResponse,
   isAppErrorPreset,
   isConfiguredAppError,
@@ -999,6 +1000,20 @@ return AppError.response(new AppError("FORBIDDEN"));
 
 This method delegates to `jsonErrorResponse()`.
 
+The JSON response body includes the error `code`, `message`, HTTP `status`,
+`priority`, and optional `details`:
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "You do not have permission to perform this action.",
+    "status": 403,
+    "priority": "medium"
+  }
+}
+```
+
 ### `AppError.response.json(error)` and `AppError.response.text(error)`
 
 The explicit response helpers create either a standardized JSON response or a
@@ -1013,18 +1028,44 @@ Both methods accept `error: unknown` and return a `Response`. The JSON helper
 uses `application/json; charset=utf-8`; the text helper uses
 `text/plain; charset=utf-8` and returns the safe normalized message.
 
-### `AppError.getError(error)`
+### `normalizeError(error)`
 
-Normalizes an error or unknown value into a safe application error
-representation.
+Normalizes an unknown value without requiring the value to carry the
+application error brand. Values with valid `code`, `message`, `status`, and
+`priority` fields retain those safe fields and optional valid `details`.
+Unexpected values or values missing any required field are replaced with the
+generic internal-server preset.
 
 ```ts
-const normalized = AppError.getError(error);
+const normalized = normalizeError(error);
+```
+
+### `AppError.normalize(error)`
+
+The configured error class also exposes the same brand-independent
+normalization helper.
+
+```ts
+const normalized = AppError.normalize(error);
 ```
 
 The returned value includes `code`, `message`, `status`, `priority`, and
-optional `details`. Unexpected errors are replaced with the generic internal
-server preset so sensitive exception messages are not exposed.
+optional `details`. Unexpected errors are replaced with the generic
+internal-server preset so sensitive exception messages are not exposed.
+
+### `AppError.get(error)`
+
+Gets a branded application error as a safe normalized representation.
+Unlike `normalizeError`, this helper only accepts errors created by the
+configured `AppError` class. Unbranded errors and other unknown values are
+replaced with the generic internal-server preset.
+
+```ts
+const normalized = AppError.get(error);
+```
+
+The returned value includes `code`, `message`, `status`, `priority`, and
+optional `details`.
 
 ### `jsonErrorResponse(error)`
 
