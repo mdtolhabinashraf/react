@@ -8,6 +8,7 @@ import {
   isAppErrorPreset,
   isConfiguredAppError,
   jsonErrorResponse,
+  normalizeError,
 } from "../../src/utils/app-error";
 
 const AppError = createAppError({
@@ -88,6 +89,46 @@ describe("isConfiguredAppError", () => {
   it("rejects non-error values", () => {
     expect(isConfiguredAppError(null)).toBe(false);
     expect(isConfiguredAppError({ code: "ERROR" })).toBe(false);
+  });
+});
+
+describe("normalizeError", () => {
+  it("normalizes a valid unbranded error shape", () => {
+    expect(
+      normalizeError({
+        code: "UPSTREAM_FAILURE",
+        message: "The upstream service failed.",
+        status: 502,
+        priority: "high",
+        details: {
+          service: "payments",
+        },
+      }),
+    ).toEqual({
+      code: "UPSTREAM_FAILURE",
+      message: "The upstream service failed.",
+      status: 502,
+      priority: "high",
+      details: {
+        service: "payments",
+      },
+    });
+  });
+
+  it("uses the internal server preset for invalid values", () => {
+    expect(normalizeError(new Error("Sensitive failure"))).toEqual(
+      defaultErrorPreset.INTERNAL_SERVER,
+    );
+  });
+
+  it("falls back when a required field is missing", () => {
+    expect(
+      normalizeError({
+        code: "INVALID",
+        message: "Invalid error.",
+        status: 400,
+      }),
+    ).toEqual(defaultErrorPreset.INTERNAL_SERVER);
   });
 });
 
@@ -231,6 +272,8 @@ describe("jsonErrorResponse", () => {
       error: {
         code: "USER_NOT_FOUND",
         message: "The requested user was not found.",
+        status: 404,
+        priority: "low",
       },
     });
   });
@@ -244,12 +287,14 @@ describe("jsonErrorResponse", () => {
       error: {
         code: "FORBIDDEN",
         message: "You do not have permission to perform this action.",
+        status: 403,
+        priority: "medium",
       },
     });
   });
 
   it("normalizes configured and unexpected errors", () => {
-    expect(AppError.getError(new AppError("FORBIDDEN"))).toEqual({
+    expect(AppError.get(new AppError("FORBIDDEN"))).toEqual({
       code: "FORBIDDEN",
       message: "You do not have permission to perform this action.",
       status: 403,
@@ -259,6 +304,15 @@ describe("jsonErrorResponse", () => {
     expect(getError(new Error("Sensitive failure"))).toEqual(
       defaultErrorPreset.INTERNAL_SERVER,
     );
+
+    expect(
+      getError({
+        code: "UPSTREAM_FAILURE",
+        message: "The upstream service failed.",
+        status: 502,
+        priority: "high",
+      }),
+    ).toEqual(defaultErrorPreset.INTERNAL_SERVER);
   });
 
   it("supports explicit JSON and plain-text response helpers", async () => {
@@ -274,6 +328,8 @@ describe("jsonErrorResponse", () => {
       error: {
         code: "FORBIDDEN",
         message: "You do not have permission to perform this action.",
+        status: 403,
+        priority: "medium",
       },
     });
 
@@ -297,6 +353,8 @@ describe("jsonErrorResponse", () => {
       error: {
         code: "INVALID_REQUEST",
         message: "The request is invalid.",
+        status: 400,
+        priority: "low",
         details: {
           field: "email",
         },
@@ -317,6 +375,8 @@ describe("jsonErrorResponse", () => {
       error: {
         code: "INTERNAL_SERVER",
         message: "An unexpected server error occurred.",
+        status: 500,
+        priority: "high",
       },
     });
 
@@ -334,6 +394,8 @@ describe("jsonErrorResponse", () => {
       error: {
         code: "INTERNAL_SERVER",
         message: "An unexpected server error occurred.",
+        status: 500,
+        priority: "high",
       },
     });
   });
@@ -354,6 +416,8 @@ describe("jsonErrorResponse", () => {
       error: {
         code: "INVALID_REQUEST",
         message: "The request is invalid.",
+        status: 400,
+        priority: "low",
       },
     });
   });

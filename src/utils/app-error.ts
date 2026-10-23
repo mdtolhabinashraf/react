@@ -154,6 +154,12 @@ export type ErrorResponseBody = {
     /** Safe, user-facing error message. */
     message: string;
 
+    /** HTTP error status code, from 400 through 599. */
+    status: number;
+
+    /** Relative severity of the error. */
+    priority: ErrorPriority;
+
     /** Optional additional response details. */
     details?: Record<string, unknown>;
   };
@@ -286,10 +292,38 @@ const INTERNAL_SERVER_PRESET: AppErrorPreset =
   defaultErrorPreset.INTERNAL_SERVER;
 
 /**
- * Resolves an unknown value into a safe error response representation.
+ * Normalizes an unknown value into a safe error response representation.
  *
- * Only branded application errors retain their configured status and
- * message. Other values produce a generic internal server error.
+ * Any value with a valid application error shape retains its configured
+ * status and message. Other values produce a generic internal server error.
+ *
+ * @param error - Error or unknown value to resolve.
+ * @returns The safe error response representation.
+ */
+export function normalizeError(error: unknown): NormalizedAppError {
+  if (
+    !isRecord(error) ||
+    typeof error.code !== "string" ||
+    error.code.trim().length === 0 ||
+    typeof error.message !== "string" ||
+    error.message.trim().length === 0 ||
+    !isErrorStatus(error.status) ||
+    !isErrorPriority(error.priority)
+  ) {
+    return INTERNAL_SERVER_PRESET;
+  }
+
+  return {
+    code: error.code,
+    message: error.message,
+    status: error.status,
+    priority: error.priority,
+    ...(isRecord(error.details) ? { details: error.details } : {}),
+  };
+}
+
+/**
+ * Resolves an unknown value into a safe error response representation.
  *
  * @param error - Error or unknown value to resolve.
  * @returns The safe error response representation.
@@ -299,13 +333,7 @@ export function getError(error: unknown): NormalizedAppError {
     return INTERNAL_SERVER_PRESET;
   }
 
-  return {
-    code: error.code,
-    message: error.message,
-    status: error.status,
-    priority: error.priority,
-    ...(error.details !== undefined ? { details: error.details } : {}),
-  };
+  return normalizeError(error);
 }
 
 /**
@@ -323,6 +351,8 @@ export function jsonErrorResponse(error: unknown): Response {
     error: {
       code: resolved.code,
       message: resolved.message,
+      status: resolved.status,
+      priority: resolved.priority,
       ...(resolved.details !== undefined ? { details: resolved.details } : {}),
     },
   };
@@ -347,6 +377,8 @@ export function jsonErrorResponse(error: unknown): Response {
     error: {
       code: body.error.code,
       message: body.error.message,
+      priority: body.error.priority,
+      status: body.error.status,
     },
   };
 
@@ -589,9 +621,20 @@ export function createAppError<
      * @param error - Error or unknown value to normalize.
      * @returns A standardized error representation.
      */
-    public static getError(error: unknown): NormalizedAppError {
+    public static normalize(error: unknown): NormalizedAppError {
+      return normalizeError(error);
+    }
+
+    /**
+     * Gets a branded application error as a safe normalized representation.
+     *
+     * @param error - Error or unknown value to normalize.
+     * @returns A standardized error representation.
+     */
+    public static get(error: unknown): NormalizedAppError {
       return getError(error);
     }
+
   }
 
   return ConfiguredAppError;
