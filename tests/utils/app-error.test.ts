@@ -5,8 +5,8 @@ import {
   createAppError,
   defaultErrorPreset,
   getError,
-  isAppErrorPreset,
-  isConfiguredAppError,
+  isErrorPreset,
+  isConfiguredError,
   jsonErrorResponse,
   normalizeError,
 } from "../../src/utils/app-error";
@@ -40,10 +40,10 @@ describe("defaultErrorPreset", () => {
   });
 });
 
-describe("isAppErrorPreset", () => {
+describe("isErrorPreset", () => {
   it("accepts a valid preset", () => {
     expect(
-      isAppErrorPreset({
+      isErrorPreset({
         code: "NOT_FOUND",
         message: "Resource not found.",
         status: 404,
@@ -70,25 +70,25 @@ describe("isAppErrorPreset", () => {
       details: [],
     },
   ])("rejects invalid preset: %j", (preset) => {
-    expect(isAppErrorPreset(preset)).toBe(false);
+    expect(isErrorPreset(preset)).toBe(false);
   });
 });
 
-describe("isConfiguredAppError", () => {
+describe("isConfiguredError", () => {
   it("recognizes errors created by the configured class", () => {
     const error = new AppError("USER_NOT_FOUND");
 
-    expect(isConfiguredAppError(error)).toBe(true);
+    expect(isConfiguredError(error)).toBe(true);
     expect(error[APP_ERROR_BRAND]).toBe(true);
   });
 
   it("rejects ordinary errors", () => {
-    expect(isConfiguredAppError(new Error("Unexpected error"))).toBe(false);
+    expect(isConfiguredError(new Error("Unexpected error"))).toBe(false);
   });
 
   it("rejects non-error values", () => {
-    expect(isConfiguredAppError(null)).toBe(false);
-    expect(isConfiguredAppError({ code: "ERROR" })).toBe(false);
+    expect(isConfiguredError(null)).toBe(false);
+    expect(isConfiguredError({ code: "ERROR" })).toBe(false);
   });
 });
 
@@ -294,7 +294,7 @@ describe("jsonErrorResponse", () => {
   });
 
   it("normalizes configured and unexpected errors", () => {
-    expect(AppError.get(new AppError("FORBIDDEN"))).toEqual({
+    expect(AppError.from(new AppError("FORBIDDEN"))).toEqual({
       code: "FORBIDDEN",
       message: "You do not have permission to perform this action.",
       status: 403,

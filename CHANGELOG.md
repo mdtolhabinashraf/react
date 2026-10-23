@@ -2,6 +2,17 @@
 
 All notable changes to `@tolha/react` are documented here.
 
+## [1.3.2] - 2026-10-23
+
+### Changed
+
+- Renamed `AppErrorPreset` to `ErrorPreset`.
+- Renamed `AppErrorOverrides` to `ErrorOverrides`.
+- Renamed `AppErrorResponse` to `ErrorResponse`.
+- Renamed `isAppErrorPreset` to `isErrorPreset`.
+- Renamed `isConfiguredAppError` to `isConfiguredError`.
+- Renamed `AppError.get` to `AppError.from`.
+
 ## [1.3.1] - 2026-10-23
 
 ### Added

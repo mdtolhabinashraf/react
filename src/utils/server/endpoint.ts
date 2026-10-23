@@ -541,7 +541,7 @@ export class Endpoint<
 
       return await this.config.handler(args);
     } catch (error) {
-      return EndpointError.response(error);
+      return EndpointError.response.json(error);
     }
   }
 

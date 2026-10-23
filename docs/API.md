@@ -36,8 +36,8 @@ import {
   createAppError,
   normalizeError,
   jsonErrorResponse,
-  isAppErrorPreset,
-  isConfiguredAppError,
+  isErrorPreset,
+  isConfiguredError,
   defaultErrorPreset,
   APP_ERROR_BRAND,
   EndpointClient,
@@ -46,8 +46,8 @@ import {
 
 import type {
   ErrorPriority,
-  AppErrorPreset,
-  AppErrorOverrides,
+  ErrorPreset,
+  ErrorOverrides,
   ErrorConfigOptions,
   ErrorResponseBody,
   DefaultErrorKeys,
@@ -915,7 +915,7 @@ Creates a configured application error class.
 | ------------------------------- | ------------------------------------------------------------------------------- | ------------ | -------------------------------------- |
 | `options.presets`               | `P`                                                                             | —            | Custom error presets.                  |
 | `options.includeDefaultPresets` | `IncludeDefaults`                                                               | `true`       | Whether built-in presets are included. |
-| `options.overrides`             | `Partial<Record<ErrorPresetKeys<P, IncludeDefaults>, Partial<AppErrorPreset>>>` | —            | Configuration-time preset overrides.   |
+| `options.overrides`             | `Partial<Record<ErrorPresetKeys<P, IncludeDefaults>, Partial<ErrorPreset>>>` | —            | Configuration-time preset overrides.   |
 | `options.name`                  | `string`                                                                        | `"AppError"` | Name assigned to created errors.       |
 
 **Returns:** A configured error class whose constructor accepts a preset key, a valid preset object, or a native `Error`.
@@ -965,8 +965,8 @@ new AppError("INTERNAL_SERVER", {
 
 | Parameter   | Type                                                             | Description                                            |
 | ----------- | ---------------------------------------------------------------- | ------------------------------------------------------ |
-| `input`     | `ErrorPresetKeys<P, IncludeDefaults> \| AppErrorPreset \| Error` | Registered preset key, preset object, or native error. |
-| `overrides` | `AppErrorOverrides`                                              | Optional per-instance overrides and error cause.       |
+| `input`     | `ErrorPresetKeys<P, IncludeDefaults> \| ErrorPreset \| Error` | Registered preset key, preset object, or native error. |
+| `overrides` | `ErrorOverrides`                                              | Optional per-instance overrides and error cause.       |
 
 **Instance properties**
 
@@ -1053,15 +1053,15 @@ The returned value includes `code`, `message`, `status`, `priority`, and
 optional `details`. Unexpected errors are replaced with the generic
 internal-server preset so sensitive exception messages are not exposed.
 
-### `AppError.get(error)`
+### `AppError.from(error)`
 
-Gets a branded application error as a safe normalized representation.
+Creates a safe normalized representation from a branded application error.
 Unlike `normalizeError`, this helper only accepts errors created by the
 configured `AppError` class. Unbranded errors and other unknown values are
 replaced with the generic internal-server preset.
 
 ```ts
-const normalized = AppError.get(error);
+const normalized = AppError.from(error);
 ```
 
 The returned value includes `code`, `message`, `status`, `priority`, and
@@ -1123,18 +1123,18 @@ import { defaultErrorPreset } from "@tolha/react";
 console.log(defaultErrorPreset.TOO_MANY_REQUESTS.status); // 429
 ```
 
-### `isAppErrorPreset(value)`
+### `isErrorPreset(value)`
 
-Checks whether a value satisfies the `AppErrorPreset` structure.
+Checks whether a value satisfies the `ErrorPreset` structure.
 
 **Parameters:** `value: unknown`
 
-**Returns:** `value is AppErrorPreset`
+**Returns:** `value is ErrorPreset`
 
 ```ts
-import { isAppErrorPreset } from "@tolha/react";
+import { isErrorPreset } from "@tolha/react";
 
-const valid = isAppErrorPreset({
+const valid = isErrorPreset({
   code: "NOT_FOUND",
   message: "Resource not found.",
   status: 404,
@@ -1144,7 +1144,7 @@ const valid = isAppErrorPreset({
 
 The value must have a non-empty code and message, an integer status from 400 through 599, a supported priority, and optional `details` represented by a non-array object.
 
-### `isConfiguredAppError(value)`
+### `isConfiguredError(value)`
 
 Checks whether a value is an `Error` branded as a configured application error.
 
@@ -1153,9 +1153,9 @@ Checks whether a value is an `Error` branded as a configured application error.
 **Returns:** Type predicate for a branded `Error` with valid code, status, priority, and optional details.
 
 ```ts
-import { isConfiguredAppError } from "@tolha/react";
+import { isConfiguredError } from "@tolha/react";
 
-if (isConfiguredAppError(error)) {
+if (isConfiguredError(error)) {
   console.log(error.code, error.status);
 }
 ```
@@ -1183,10 +1183,10 @@ Imports section. Import root types from `@tolha/react` and server types from
 ### Application-error types
 
 - `ErrorPriority`: `"high" | "medium" | "low"`.
-- `AppErrorPreset`: reusable error preset containing `code`, `message`, `status`, and `priority`, with optional `details`.
+- `ErrorPreset`: reusable error preset containing `code`, `message`, `status`, and `priority`, with optional `details`.
 - `DefaultErrorKeys`: keys of `defaultErrorPreset`.
 - `ErrorPresetKeys<P, IncludeDefaults>`: valid preset keys for a configured error class.
-- `AppErrorOverrides`: partial error preset overrides with an optional native error `cause`.
+- `ErrorOverrides`: partial error preset overrides with an optional native error `cause`.
 - `ErrorConfigOptions<P, IncludeDefaults>`: configuration for `createAppError()`.
 - `ErrorResponseBody`: standardized JSON error response body.
 
