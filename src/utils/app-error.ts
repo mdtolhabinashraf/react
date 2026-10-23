@@ -13,7 +13,7 @@ export type ErrorPriority = "high" | "medium" | "low";
 /**
  * Defines the configuration for a reusable application error preset.
  */
-export type AppErrorPreset = {
+export type ErrorPreset = {
   /** Stable machine-readable error code. */
   code: string;
 
@@ -41,6 +41,12 @@ export const defaultErrorPreset = {
     message: "An unknown error occurred.",
     status: 500,
     priority: "high",
+  },
+  NOT_FOUND: {
+    code: "NOT_FOUND",
+    message: "The requested resource was not found.",
+    status: 404,
+    priority: "low",
   },
   BAD_REQUEST: {
     code: "BAD_REQUEST",
@@ -84,7 +90,7 @@ export const defaultErrorPreset = {
     status: 500,
     priority: "high",
   },
-} as const satisfies Record<string, AppErrorPreset>;
+} as const satisfies Record<string, ErrorPreset>;
 
 /** Keys available in the built-in error preset collection. */
 export type DefaultErrorKeys = keyof typeof defaultErrorPreset;
@@ -98,7 +104,7 @@ type StringKeyOf<T> = Extract<keyof T, string>;
  * Resolves the valid preset keys for a configured error class.
  */
 export type ErrorPresetKeys<
-  P extends Record<string, AppErrorPreset>,
+  P extends Record<string, ErrorPreset>,
   IncludeDefaults extends boolean,
 > = StringKeyOf<P> | (IncludeDefaults extends true ? DefaultErrorKeys : never);
 
@@ -108,7 +114,7 @@ export type ErrorPresetKeys<
  * Unlike preset configuration, instance overrides can include a native
  * JavaScript error cause.
  */
-export type AppErrorOverrides = Partial<AppErrorPreset> & {
+export type ErrorOverrides = Partial<ErrorPreset> & {
   /** Original error or underlying failure. */
   cause?: unknown;
 };
@@ -117,7 +123,7 @@ export type AppErrorOverrides = Partial<AppErrorPreset> & {
  * Defines the configuration accepted by {@link createAppError}.
  */
 export type ErrorConfigOptions<
-  P extends Record<string, AppErrorPreset>,
+  P extends Record<string, ErrorPreset>,
   IncludeDefaults extends boolean,
 > = {
   /** Custom application error presets. */
@@ -132,7 +138,7 @@ export type ErrorConfigOptions<
 
   /** Partial overrides for registered presets. */
   overrides?: Partial<
-    Record<ErrorPresetKeys<P, IncludeDefaults>, Partial<AppErrorPreset>>
+    Record<ErrorPresetKeys<P, IncludeDefaults>, Partial<ErrorPreset>>
   >;
 
   /**
@@ -147,33 +153,18 @@ export type ErrorConfigOptions<
  * Standardized JSON error response body.
  */
 export type ErrorResponseBody = {
-  error: {
-    /** Stable machine-readable error code. */
-    code: string;
-
-    /** Safe, user-facing error message. */
-    message: string;
-
-    /** HTTP error status code, from 400 through 599. */
-    status: number;
-
-    /** Relative severity of the error. */
-    priority: ErrorPriority;
-
-    /** Optional additional response details. */
-    details?: Record<string, unknown>;
-  };
+  error: ErrorPreset;
 };
 
 /**
  * Safe, normalized representation of an application error.
  */
-export type NormalizedAppError = AppErrorPreset;
+export type NormalizedError = ErrorPreset;
 
 /**
  * Callable response helper with explicit JSON and plain-text variants.
  */
-export type AppErrorResponse = {
+export type ErrorResponse = {
   (error: unknown): Response;
   /** Creates a standardized JSON error response. */
   json(error: unknown): Response;
@@ -240,7 +231,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @param value - Unknown value to validate.
  * @returns `true` when the value satisfies the preset structure.
  */
-export function isAppErrorPreset(value: unknown): value is AppErrorPreset {
+export function isErrorPreset(value: unknown): value is ErrorPreset {
   if (!isRecord(value)) {
     return false;
   }
@@ -263,7 +254,7 @@ export function isAppErrorPreset(value: unknown): value is AppErrorPreset {
  * @param value - Value to check.
  * @returns `true` when the value is a branded application error.
  */
-export function isConfiguredAppError(value: unknown): value is Error & {
+export function isConfiguredError(value: unknown): value is Error & {
   readonly [APP_ERROR_BRAND]: true;
   readonly code: string;
   readonly status: number;
@@ -288,7 +279,7 @@ export function isConfiguredAppError(value: unknown): value is Error & {
 /**
  * Default response configuration for unexpected errors.
  */
-const INTERNAL_SERVER_PRESET: AppErrorPreset =
+const INTERNAL_SERVER_PRESET: ErrorPreset =
   defaultErrorPreset.INTERNAL_SERVER;
 
 /**
@@ -300,7 +291,7 @@ const INTERNAL_SERVER_PRESET: AppErrorPreset =
  * @param error - Error or unknown value to resolve.
  * @returns The safe error response representation.
  */
-export function normalizeError(error: unknown): NormalizedAppError {
+export function normalizeError(error: unknown): NormalizedError {
   if (
     !isRecord(error) ||
     typeof error.code !== "string" ||
@@ -328,8 +319,8 @@ export function normalizeError(error: unknown): NormalizedAppError {
  * @param error - Error or unknown value to resolve.
  * @returns The safe error response representation.
  */
-export function getError(error: unknown): NormalizedAppError {
-  if (!isConfiguredAppError(error)) {
+export function getError(error: unknown): NormalizedError {
+  if (!isConfiguredError(error)) {
     return INTERNAL_SERVER_PRESET;
   }
 
@@ -408,7 +399,7 @@ function textErrorResponse(error: unknown): Response {
 /**
  * Creates the callable response API exposed by configured application errors.
  */
-const appErrorResponse: AppErrorResponse = Object.assign(
+const appErrorResponse: ErrorResponse = Object.assign(
   (error: unknown) => jsonErrorResponse(error),
   {
     json: (error: unknown) => jsonErrorResponse(error),
@@ -444,7 +435,7 @@ const appErrorResponse: AppErrorResponse = Object.assign(
  * ```
  */
 export function createAppError<
-  const P extends Record<string, AppErrorPreset> = Record<never, never>,
+  const P extends Record<string, ErrorPreset> = Record<never, never>,
   const IncludeDefaults extends boolean = true,
 >(options: ErrorConfigOptions<P, IncludeDefaults> = {}) {
   const includeDefaults =
@@ -452,7 +443,7 @@ export function createAppError<
       ? true
       : options.includeDefaultPresets;
 
-  const presetMap: Record<string, AppErrorPreset> = {
+  const presetMap: Record<string, ErrorPreset> = {
     ...(includeDefaults ? defaultErrorPreset : {}),
     ...(options.presets ?? {}),
   };
@@ -473,12 +464,12 @@ export function createAppError<
       throw new TypeError(`Application error preset "${key}" is unavailable.`);
     }
 
-    const mergedPreset: AppErrorPreset = {
+    const mergedPreset: ErrorPreset = {
       ...currentPreset,
       ...override,
     };
 
-    if (!isAppErrorPreset(mergedPreset)) {
+    if (!isErrorPreset(mergedPreset)) {
       throw new TypeError(
         `Application error preset "${key}" has an invalid configuration.`,
       );
@@ -491,7 +482,7 @@ export function createAppError<
    * Validates every registered preset before creating the class.
    */
   for (const [key, preset] of Object.entries(presetMap)) {
-    if (!isAppErrorPreset(preset)) {
+    if (!isErrorPreset(preset)) {
       throw new TypeError(
         `Application error preset "${key}" has an invalid configuration.`,
       );
@@ -501,7 +492,7 @@ export function createAppError<
   /**
    * Configured application error class.
    */
-  class ConfiguredAppError extends Error {
+  class ConfiguredError extends Error {
     /** Identifies the error as an application error. */
     public readonly [APP_ERROR_BRAND] = true as const;
 
@@ -539,10 +530,10 @@ export function createAppError<
      * ```
      */
     public constructor(
-      input: ErrorPresetKeys<P, IncludeDefaults> | AppErrorPreset | Error,
-      overrides: AppErrorOverrides = {},
+      input: ErrorPresetKeys<P, IncludeDefaults> | ErrorPreset | Error,
+      overrides: ErrorOverrides = {},
     ) {
-      let preset: AppErrorPreset;
+      let preset: ErrorPreset;
 
       if (input instanceof Error) {
         preset = INTERNAL_SERVER_PRESET;
@@ -560,7 +551,7 @@ export function createAppError<
         }
 
         preset = registeredPreset;
-      } else if (isAppErrorPreset(input)) {
+      } else if (isErrorPreset(input)) {
         preset = input;
       } else {
         throw new TypeError(
@@ -570,12 +561,12 @@ export function createAppError<
 
       const { cause: explicitCause, ...presetOverrides } = overrides;
 
-      const config: AppErrorPreset = {
+      const config: ErrorPreset = {
         ...preset,
         ...presetOverrides,
       };
 
-      if (!isAppErrorPreset(config)) {
+      if (!isErrorPreset(config)) {
         throw new TypeError("Invalid application error configuration.");
       }
 
@@ -603,7 +594,7 @@ export function createAppError<
      * Converts an error into a standardized JSON HTTP response.
      *
      * This static helper supports the callable form and the explicit
-     * {@link AppErrorResponse.json} and {@link AppErrorResponse.text} forms.
+     * {@link ErrorResponse.json} and {@link ErrorResponse.text} forms.
      *
      * @param error - Error or unknown value to convert.
      * @returns A JSON HTTP response.
@@ -621,21 +612,20 @@ export function createAppError<
      * @param error - Error or unknown value to normalize.
      * @returns A standardized error representation.
      */
-    public static normalize(error: unknown): NormalizedAppError {
+    public static normalize(error: unknown): NormalizedError {
       return normalizeError(error);
     }
 
     /**
-     * Gets a branded application error as a safe normalized representation.
+     * Creates a safe normalized representation from a branded application error.
      *
      * @param error - Error or unknown value to normalize.
      * @returns A standardized error representation.
      */
-    public static get(error: unknown): NormalizedAppError {
+    public static from(error: unknown): NormalizedError {
       return getError(error);
     }
-
   }
 
-  return ConfiguredAppError;
+  return ConfiguredError;
 }

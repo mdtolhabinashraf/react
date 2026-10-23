@@ -1,6 +1,6 @@
 {
   "name": "@tolha/react",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Type-safe React utilities for modern TypeScript applications.",
   "license": "MIT",
   "author": "Md. Tolha Bin Ashraf",
